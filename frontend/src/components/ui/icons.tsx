@@ -180,3 +180,25 @@ export function IconCheck(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function IconSliders(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 8h8M16 8h4M4 16h4M12 16h8" />
+      <circle cx="14" cy="8" r="2" />
+      <circle cx="10" cy="16" r="2" />
+    </Icon>
+  );
+}
+
+export function IconPalette(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 21a9 9 0 110-18 8.5 8.5 0 018.5 8.5 4 4 0 01-4 4h-2a2 2 0 00-1.5 3.3c.4.5.2 1.5-1 2.2z" />
+      <circle cx="7.5" cy="11.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17.5" cy="11.5" r="1" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}

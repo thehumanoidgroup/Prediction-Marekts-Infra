@@ -8,28 +8,52 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { FeedStatusDot } from "@/components/markets/live-price";
 import { IconBell, IconShield } from "@/components/ui/icons";
-import { MobileNavLinks, SidebarLinks, type NavItem } from "@/components/layout/nav-links";
+import {
+  MobileNavLinks,
+  SidebarLinks,
+  type NavGroup,
+  type NavItem,
+} from "@/components/layout/nav-links";
 import { TenantSwitcher } from "@/components/layout/tenant-switcher";
 
-function navItems(tenant: TenantConfig): NavItem[] {
-  const items: NavItem[] = [
+function navGroups(tenant: TenantConfig): NavGroup[] {
+  const trader: NavItem[] = [
     { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
     { href: "/markets", label: "Markets", icon: "markets" },
     { href: "/portfolio", label: "Portfolio", icon: "portfolio" },
   ];
-  if (tenant.features.journal) items.push({ href: "/journal", label: "Journal", icon: "journal" });
+  if (tenant.features.journal) trader.push({ href: "/journal", label: "Journal", icon: "journal" });
   if (tenant.features.leaderboard)
-    items.push({ href: "/leaderboard", label: "Leaderboard", icon: "trophy" });
-  items.push({ href: "/settings", label: "Settings", icon: "settings" });
-  return items;
+    trader.push({ href: "/leaderboard", label: "Leaderboard", icon: "trophy" });
+  trader.push({ href: "/settings", label: "Settings", icon: "settings" });
+
+  // Role-gated to PropFirmAdmin once auth is wired to the backend.
+  const admin: NavItem[] = [
+    { href: "/admin", label: "Overview", icon: "shield", exact: true },
+    { href: "/admin/challenges", label: "Challenge rules", icon: "sliders" },
+    { href: "/admin/traders", label: "Traders", icon: "users" },
+    { href: "/admin/branding", label: "Branding", icon: "palette" },
+    { href: "/admin/markets", label: "Market templates", icon: "markets" },
+  ];
+
+  return [{ items: trader }, { label: "Firm admin", items: admin }];
 }
 
 function Logo({ tenant }: { tenant: TenantConfig }) {
   return (
     <Link href="/" className="flex items-center gap-2.5">
-      <span className="flex size-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-accent-foreground">
-        {tenant.branding.logoGlyph}
-      </span>
+      {tenant.branding.logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- data URLs from the branding studio
+        <img
+          src={tenant.branding.logoUrl}
+          alt=""
+          className="size-8 rounded-lg object-cover"
+        />
+      ) : (
+        <span className="flex size-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-accent-foreground">
+          {tenant.branding.logoGlyph}
+        </span>
+      )}
       <span className="text-[15px] font-semibold tracking-tight">{tenant.name}</span>
     </Link>
   );
@@ -50,8 +74,11 @@ export function AppShell({
   account: ChallengeAccount;
   children: ReactNode;
 }) {
-  const items = navItems(tenant);
-  const mobileItems = items.filter((item) => item.href !== "/settings").slice(0, 5);
+  const groups = navGroups(tenant);
+  const mobileItems: NavItem[] = [
+    ...groups[0].items.filter((item) => item.href !== "/settings").slice(0, 4),
+    { href: "/admin", label: "Admin", icon: "shield" },
+  ];
   const dailyUp = account.dailyPnl >= 0;
 
   return (
@@ -59,8 +86,8 @@ export function AppShell({
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-edge bg-surface px-4 py-5 lg:flex">
         <Logo tenant={tenant} />
-        <div className="mt-6 flex-1">
-          <SidebarLinks items={items} />
+        <div className="mt-6 flex-1 overflow-y-auto">
+          <SidebarLinks groups={groups} />
         </div>
         <div className="rounded-card border border-edge bg-surface-2 p-3">
           <div className="flex items-center justify-between">

@@ -125,6 +125,30 @@ export interface LeaderboardEntry {
   trades: number;
 }
 
+export type TraderStatus = "active" | "passed" | "failed";
+
+/** A firm's trader as seen by the admin dashboard. */
+export interface AdminTrader {
+  id: string;
+  name: string;
+  email: string;
+  country: string;
+  accountSize: number;
+  phase: ChallengePhase;
+  status: TraderStatus;
+  equity: number;
+  pnl: number;
+  pnlPct: number;
+  winRate: number;
+  trades: number;
+  /** Share of the max-drawdown budget consumed, 0-100. */
+  drawdownUsedPct: number;
+  /** Share of today's loss budget consumed, 0-100. */
+  dailyLossUsedPct: number;
+  joinedAt: number;
+  lastActiveAt: number;
+}
+
 export interface PortfolioSummary {
   balance: number;
   equity: number;

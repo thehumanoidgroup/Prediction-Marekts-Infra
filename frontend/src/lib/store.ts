@@ -1,5 +1,6 @@
 import { createRng, seedFromString } from "@/lib/rng";
 import type {
+  AdminTrader,
   ChallengeAccount,
   ChallengeObjective,
   JournalEntry,
@@ -11,7 +12,7 @@ import type {
   Position,
   PricePoint,
 } from "@/lib/types";
-import { getTenant } from "@/lib/tenants";
+import { getTenant, type TenantConfig } from "@/lib/tenants";
 
 /**
  * In-memory data store seeded deterministically per process.
@@ -29,10 +30,21 @@ interface TenantState {
   journal: JournalEntry[];
 }
 
+/** Admin-editable white-label settings layered over the static registry. */
+export interface TenantOverrides {
+  name?: string;
+  tagline?: string;
+  branding?: Partial<TenantConfig["branding"]>;
+  features?: Partial<TenantConfig["features"]>;
+  program?: Partial<TenantConfig["program"]>;
+}
+
 interface Store {
   markets: Market[];
   tenants: Map<string, TenantState>;
   leaderboards: Map<string, LeaderboardEntry[]>;
+  adminTraders: Map<string, AdminTrader[]>;
+  overrides: Map<string, TenantOverrides>;
 }
 
 const HOUR = 3_600_000;
@@ -310,12 +322,51 @@ function generateLeaderboard(tenantId: string): LeaderboardEntry[] {
     .map((entry, i) => ({ ...entry, rank: i + 1 }));
 }
 
+function generateAdminTraders(tenantId: string, now: number): AdminTrader[] {
+  const rng = createRng(seedFromString(`admin-traders:${tenantId}`));
+  const program = getTenant(tenantId).program;
+  return TRADER_NAMES.slice(0, 14).map((name, i) => {
+    const accountSize = program.accountSizes[Math.floor(rng() * program.accountSizes.length)];
+    const roll = rng();
+    // Indexes 2 and 9 are always funded so firm KPIs are populated.
+    const status: AdminTrader["status"] =
+      i === 2 || i === 9 || roll > 0.8 ? "passed" : roll < 0.14 ? "failed" : "active";
+    const phase: AdminTrader["phase"] =
+      status === "passed" ? "funded" : rng() > 0.6 ? "verification" : "evaluation";
+    const pnlPct =
+      status === "failed" ? -(program.maxDrawdownPct + rng() * 2) : (rng() - 0.25) * 20;
+    const pnl = (pnlPct / 100) * accountSize;
+    const drawdownUsedPct =
+      status === "failed" ? 100 : Math.min(96, Math.max(4, 20 + rng() * 55 - pnlPct));
+    return {
+      id: `trader-${tenantId}-${i + 1}`,
+      name,
+      email: `${name.toLowerCase().replace(/[^a-z]/g, "")}@example.com`,
+      country: COUNTRIES[i],
+      accountSize,
+      phase,
+      status,
+      equity: Math.round(accountSize + pnl),
+      pnl: Math.round(pnl),
+      pnlPct: Number(pnlPct.toFixed(1)),
+      winRate: Number((40 + rng() * 32).toFixed(1)),
+      trades: Math.round(8 + rng() * 240),
+      drawdownUsedPct: Number(drawdownUsedPct.toFixed(0)),
+      dailyLossUsedPct: Number((status === "active" ? rng() * 70 : 0).toFixed(0)),
+      joinedAt: now - Math.round(5 + rng() * 80) * DAY,
+      lastActiveAt: now - Math.round(rng() * 48) * HOUR,
+    };
+  });
+}
+
 function createStore(): Store {
   const now = Date.now();
   return {
     markets: generateMarkets(now),
     tenants: new Map(),
     leaderboards: new Map(),
+    adminTraders: new Map(),
+    overrides: new Map(),
   };
 }
 
@@ -346,6 +397,72 @@ export function getLeaderboard(tenantId: string): LeaderboardEntry[] {
     store.leaderboards.set(tenantId, board);
   }
   return board;
+}
+
+export function getAdminTraders(tenantId: string): AdminTrader[] {
+  const store = getStore();
+  let traders = store.adminTraders.get(tenantId);
+  if (!traders) {
+    traders = generateAdminTraders(tenantId, Date.now());
+    store.adminTraders.set(tenantId, traders);
+  }
+  return traders;
+}
+
+export function getTenantOverrides(tenantId: string): TenantOverrides {
+  return getStore().overrides.get(tenantId) ?? {};
+}
+
+/** Deep-merges a settings patch into the tenant's stored overrides. */
+export function patchTenantOverrides(tenantId: string, patch: TenantOverrides): TenantOverrides {
+  const store = getStore();
+  const current = store.overrides.get(tenantId) ?? {};
+  const next: TenantOverrides = {
+    ...current,
+    ...(patch.name !== undefined && { name: patch.name }),
+    ...(patch.tagline !== undefined && { tagline: patch.tagline }),
+    branding: { ...current.branding, ...patch.branding },
+    features: { ...current.features, ...patch.features },
+    program: { ...current.program, ...patch.program },
+  };
+  store.overrides.set(tenantId, next);
+  return next;
+}
+
+export interface CreateMarketInput {
+  question: string;
+  category: MarketCategory;
+  /** Initial YES probability in [0.03, 0.97]. */
+  initialProbability: number;
+  closesAt: number;
+}
+
+/** Adds an admin-created market; it is immediately tradable by traders. */
+export function createMarketFromTemplate(input: CreateMarketInput): Market {
+  const store = getStore();
+  const now = Date.now();
+  const price = Math.min(0.97, Math.max(0.03, input.initialProbability));
+  // Flat pre-launch history anchored at the initial probability.
+  const history: PricePoint[] = Array.from({ length: 12 }, (_, i) => ({
+    t: now - (11 - i) * HOUR,
+    p: price,
+  }));
+  const market: Market = {
+    id: `mkt-${store.markets.length + 1}-c`,
+    question: input.question.trim(),
+    category: input.category,
+    status: "open",
+    yesPrice: price,
+    change24h: 0,
+    volume: 0,
+    volume24h: 0,
+    openInterest: 0,
+    traders: 0,
+    closesAt: input.closesAt,
+    history,
+  };
+  store.markets.unshift(market);
+  return market;
 }
 
 export { buildObjectives };

@@ -8,15 +8,26 @@ import {
   IconDashboard,
   IconJournal,
   IconMarkets,
+  IconPalette,
   IconPortfolio,
   IconSettings,
+  IconShield,
+  IconSliders,
   IconTrophy,
+  IconUsers,
 } from "@/components/ui/icons";
 
 export interface NavItem {
   href: string;
   label: string;
   icon: string;
+  /** Highlight only on an exact path match (e.g. section index pages). */
+  exact?: boolean;
+}
+
+export interface NavGroup {
+  label?: string;
+  items: NavItem[];
 }
 
 const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
@@ -26,36 +37,51 @@ const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   journal: IconJournal,
   trophy: IconTrophy,
   settings: IconSettings,
+  shield: IconShield,
+  users: IconUsers,
+  sliders: IconSliders,
+  palette: IconPalette,
 };
 
-function isActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, item: NavItem): boolean {
+  if (item.exact || item.href === "/") return pathname === item.href;
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function SidebarLinks({ items }: { items: NavItem[] }) {
+export function SidebarLinks({ groups }: { groups: NavGroup[] }) {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-col gap-1">
-      {items.map((item) => {
-        const Icon = iconMap[item.icon];
-        const active = isActive(pathname, item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              active
-                ? "bg-accent-soft font-medium text-accent"
-                : "text-muted hover:bg-surface-2 hover:text-foreground",
-            )}
-          >
-            <Icon className="text-[18px]" />
-            {item.label}
-          </Link>
-        );
-      })}
+    <nav className="flex flex-col gap-4">
+      {groups.map((group, index) => (
+        <div key={group.label ?? index}>
+          {group.label ? (
+            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-faint">
+              {group.label}
+            </p>
+          ) : null}
+          <div className="flex flex-col gap-1">
+            {group.items.map((item) => {
+              const Icon = iconMap[item.icon];
+              const active = isActive(pathname, item);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                    active
+                      ? "bg-accent-soft font-medium text-accent"
+                      : "text-muted hover:bg-surface-2 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="text-[18px]" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 }
@@ -66,7 +92,7 @@ export function MobileNavLinks({ items }: { items: NavItem[] }) {
     <nav className="grid h-16 auto-cols-fr grid-flow-col">
       {items.map((item) => {
         const Icon = iconMap[item.icon];
-        const active = isActive(pathname, item.href);
+        const active = isActive(pathname, item);
         return (
           <Link
             key={item.href}

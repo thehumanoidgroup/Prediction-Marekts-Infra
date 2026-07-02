@@ -1,5 +1,17 @@
-import { getLeaderboard, getStore, getTenantState } from "@/lib/store";
+import {
+  createMarketFromTemplate,
+  getAdminTraders as storeAdminTraders,
+  getLeaderboard,
+  getStore,
+  getTenantOverrides,
+  getTenantState,
+  patchTenantOverrides,
+  type CreateMarketInput,
+  type TenantOverrides,
+} from "@/lib/store";
+import { getTenant, type TenantConfig } from "@/lib/tenants";
 import type {
+  AdminTrader,
   ChallengeAccount,
   JournalEntry,
   LeaderboardEntry,
@@ -216,6 +228,94 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
   });
 
   return { order, position };
+}
+
+// ---------------------------------------------------------------------------
+// Firm admin (PropFirmAdmin) services. In production these sit behind the
+// role-gated FastAPI endpoints; the demo store applies them immediately.
+// ---------------------------------------------------------------------------
+
+/** Registry config merged with the firm's admin-edited overrides. */
+export function getEffectiveTenant(tenantId: string): TenantConfig {
+  const base = getTenant(tenantId);
+  const overrides = getTenantOverrides(tenantId);
+  return {
+    ...base,
+    name: overrides.name ?? base.name,
+    tagline: overrides.tagline ?? base.tagline,
+    branding: { ...base.branding, ...overrides.branding },
+    features: { ...base.features, ...overrides.features },
+    program: { ...base.program, ...overrides.program },
+  };
+}
+
+/** Applies a white-label settings patch (branding, program rules, flags). */
+export function updateTenantSettings(tenantId: string, patch: TenantOverrides): TenantConfig {
+  patchTenantOverrides(tenantId, patch);
+  return getEffectiveTenant(tenantId);
+}
+
+export function getFirmTraders(tenantId: string): AdminTrader[] {
+  return [...storeAdminTraders(tenantId)].sort((a, b) => b.pnlPct - a.pnlPct);
+}
+
+export interface FirmStats {
+  activeTraders: number;
+  fundedTraders: number;
+  failedTraders: number;
+  passRate: number;
+  totalEquity: number;
+  totalPnl: number;
+  avgWinRate: number;
+  atRiskTraders: number;
+}
+
+export function getFirmStats(tenantId: string): FirmStats {
+  const traders = storeAdminTraders(tenantId);
+  const finished = traders.filter((t) => t.status !== "active");
+  const passed = traders.filter((t) => t.status === "passed");
+  return {
+    activeTraders: traders.filter((t) => t.status === "active").length,
+    fundedTraders: passed.length,
+    failedTraders: traders.filter((t) => t.status === "failed").length,
+    passRate: finished.length ? (passed.length / finished.length) * 100 : 0,
+    totalEquity: traders.reduce((sum, t) => sum + t.equity, 0),
+    totalPnl: traders.reduce((sum, t) => sum + t.pnl, 0),
+    avgWinRate: traders.length
+      ? traders.reduce((sum, t) => sum + t.winRate, 0) / traders.length
+      : 0,
+    atRiskTraders: traders.filter((t) => t.status === "active" && t.drawdownUsedPct >= 75).length,
+  };
+}
+
+const MARKET_CATEGORIES: MarketCategory[] = [
+  "crypto",
+  "stocks",
+  "forex",
+  "commodities",
+  "economics",
+  "indices",
+];
+
+/** Creates a market from an admin template; validates before mutating. */
+export function createMarket(input: CreateMarketInput): Market {
+  if (!input.question.trim() || input.question.trim().length < 10) {
+    throw new Error("Question must be at least 10 characters");
+  }
+  if (!MARKET_CATEGORIES.includes(input.category)) {
+    throw new Error(`Unknown category: ${input.category}`);
+  }
+  if (
+    !Number.isFinite(input.initialProbability) ||
+    input.initialProbability < 0.03 ||
+    input.initialProbability > 0.97
+  ) {
+    throw new Error("Initial probability must be between 3% and 97%");
+  }
+  if (!Number.isFinite(input.closesAt) || input.closesAt <= Date.now()) {
+    throw new Error("Close date must be in the future");
+  }
+  return createMarketFromTemplate(input);
 }
 
 /** Adds a freeform note (no trade attached) to the trader's journal. */

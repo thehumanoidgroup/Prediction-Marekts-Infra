@@ -10,6 +10,8 @@
  * the shape below is the contract the rest of the app codes against.
  */
 
+export type DrawdownMode = "static" | "trailing" | "absolute";
+
 export interface TenantBranding {
   /** Primary accent, used for CTAs, active states, charts. */
   accent: string;
@@ -21,6 +23,26 @@ export interface TenantBranding {
   accentForeground: string;
   /** Single glyph / short mark rendered in the logo tile. */
   logoGlyph: string;
+  /** Optional uploaded logo (data URL in the demo, CDN URL in prod). */
+  logoUrl?: string;
+}
+
+export interface TenantProgram {
+  currency: string;
+  accountSizes: number[];
+  profitTargetPct: number;
+  maxDailyLossPct: number;
+  maxDrawdownPct: number;
+  /** Which drawdown floor policy applies (mirrors the risk engine). */
+  drawdownMode: DrawdownMode;
+  profitSplitPct: number;
+  /** Max stake on a single pick (order), USD. */
+  maxStakePerOrder: number;
+  /** Max total cost basis at risk in one market, USD. */
+  maxExposurePerMarket: number;
+  /** Challenge time limit in days. */
+  challengeDurationDays: number;
+  minTradingDays: number;
 }
 
 export interface TenantConfig {
@@ -37,14 +59,7 @@ export interface TenantConfig {
     payouts: boolean;
   };
   /** Challenge program defaults shown across the product. */
-  program: {
-    currency: string;
-    accountSizes: number[];
-    profitTargetPct: number;
-    maxDailyLossPct: number;
-    maxDrawdownPct: number;
-    profitSplitPct: number;
-  };
+  program: TenantProgram;
 }
 
 export const DEFAULT_TENANT_ID = "proppredict";
@@ -69,7 +84,12 @@ const tenants: Record<string, TenantConfig> = {
       profitTargetPct: 10,
       maxDailyLossPct: 5,
       maxDrawdownPct: 10,
+      drawdownMode: "static",
       profitSplitPct: 80,
+      maxStakePerOrder: 2_500,
+      maxExposurePerMarket: 5_000,
+      challengeDurationDays: 60,
+      minTradingDays: 10,
     },
   },
   apex: {
@@ -91,7 +111,12 @@ const tenants: Record<string, TenantConfig> = {
       profitTargetPct: 8,
       maxDailyLossPct: 4,
       maxDrawdownPct: 8,
+      drawdownMode: "trailing",
       profitSplitPct: 90,
+      maxStakePerOrder: 5_000,
+      maxExposurePerMarket: 10_000,
+      challengeDurationDays: 45,
+      minTradingDays: 7,
     },
   },
   nova: {
@@ -113,7 +138,12 @@ const tenants: Record<string, TenantConfig> = {
       profitTargetPct: 12,
       maxDailyLossPct: 5,
       maxDrawdownPct: 12,
+      drawdownMode: "static",
       profitSplitPct: 75,
+      maxStakePerOrder: 2_000,
+      maxExposurePerMarket: 4_000,
+      challengeDurationDays: 90,
+      minTradingDays: 12,
     },
   },
 };
