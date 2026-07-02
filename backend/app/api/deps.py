@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,18 +15,16 @@ bearer_scheme = HTTPBearer(auto_error=False)
 async def get_current_tenant(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    x_tenant_slug: Annotated[str | None, Header()] = None,
 ) -> Tenant:
-    """Resolves the tenant for this request.
+    """Loads the tenant resolved by ``TenantContextMiddleware``.
 
-    Priority: `X-Tenant-Slug` header (set by the frontend / API clients),
-    then the left-most label of the Host header (subdomain routing in
-    production). 404s on unknown or deactivated firms.
+    The middleware extracts the slug (X-Tenant-Slug header, then Host
+    subdomain); this dependency validates it against the database and
+    404s unknown or deactivated firms.
     """
-    slug = x_tenant_slug
+    slug: str | None = getattr(request.state, "tenant_slug", None)
     if not slug:
-        host = request.headers.get("host", "")
-        slug = host.split(":")[0].split(".")[0]
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No tenant specified")
 
     result = await db.execute(select(Tenant).where(Tenant.slug == slug, Tenant.is_active))
     tenant = result.scalar_one_or_none()
