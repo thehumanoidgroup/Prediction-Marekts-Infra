@@ -84,6 +84,7 @@ export function EquityChart({
             fill="url(#equityFill)"
             dot={false}
             activeDot={{ r: 3, strokeWidth: 0 }}
+            isAnimationActive={false}
           />
         </AreaChart>
       </ResponsiveContainer>

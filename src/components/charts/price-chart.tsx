@@ -71,6 +71,7 @@ export function PriceChart({ data }: { data: PricePoint[] }) {
             fill="url(#priceFill)"
             dot={false}
             activeDot={{ r: 3, strokeWidth: 0 }}
+            isAnimationActive={false}
           />
         </AreaChart>
       </ResponsiveContainer>
