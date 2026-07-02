@@ -202,6 +202,7 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
   state.orders.push(order);
   state.journal.unshift({
     id: `jnl-${tenantId}-live-${state.orders.length}`,
+    kind: "trade",
     marketId: market.id,
     marketQuestion: market.question,
     outcome: input.outcome,
@@ -215,4 +216,28 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
   });
 
   return { order, position };
+}
+
+/** Adds a freeform note (no trade attached) to the trader's journal. */
+export function addJournalNote(tenantId: string, note: string, tags: string[] = []): JournalEntry {
+  const trimmed = note.trim();
+  if (!trimmed) throw new Error("Note cannot be empty");
+
+  const state = getTenantState(tenantId);
+  const entry: JournalEntry = {
+    id: `jnl-${tenantId}-note-${Date.now()}`,
+    kind: "note",
+    marketId: null,
+    marketQuestion: null,
+    outcome: null,
+    side: null,
+    shares: null,
+    price: null,
+    pnl: null,
+    note: trimmed.slice(0, 2000),
+    tags: tags.slice(0, 5).map((t) => t.trim().toLowerCase()).filter(Boolean),
+    executedAt: Date.now(),
+  };
+  state.journal.unshift(entry);
+  return entry;
 }

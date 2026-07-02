@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Outcome } from "@/lib/types";
+import { useLivePrice } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,12 +11,12 @@ import { cn } from "@/lib/utils";
 const QUICK_SIZES = [100, 250, 500, 1000];
 
 /**
- * Order ticket. Fills market orders against the demo matching engine via
- * `POST /api/orders` and refreshes server components on success.
+ * Order ticket. Reprices from the live feed while open; fills market
+ * orders via `POST /api/orders` and refreshes server components.
  */
 export function TradePanel({
   marketId,
-  yesPrice,
+  yesPrice: initialYesPrice,
   balance,
   disabled,
 }: {
@@ -25,6 +26,7 @@ export function TradePanel({
   disabled?: boolean;
 }) {
   const router = useRouter();
+  const yesPrice = useLivePrice(marketId, initialYesPrice);
   const [outcome, setOutcome] = useState<Outcome>("yes");
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [shares, setShares] = useState(250);

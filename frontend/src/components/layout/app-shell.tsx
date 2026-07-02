@@ -6,13 +6,14 @@ import type { ChallengeAccount } from "@/lib/types";
 import { formatSignedUsd, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { FeedStatusDot } from "@/components/markets/live-price";
 import { IconBell, IconShield } from "@/components/ui/icons";
 import { MobileNavLinks, SidebarLinks, type NavItem } from "@/components/layout/nav-links";
 import { TenantSwitcher } from "@/components/layout/tenant-switcher";
 
 function navItems(tenant: TenantConfig): NavItem[] {
   const items: NavItem[] = [
-    { href: "/", label: "Dashboard", icon: "dashboard" },
+    { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
     { href: "/markets", label: "Markets", icon: "markets" },
     { href: "/portfolio", label: "Portfolio", icon: "portfolio" },
   ];
@@ -85,11 +86,7 @@ export function AppShell({
               <Logo tenant={tenant} />
             </div>
             <div className="hidden items-center gap-2 lg:flex">
-              <span className="relative flex size-2">
-                <span className="animate-live absolute inline-flex size-full rounded-full bg-up" />
-                <span className="relative inline-flex size-2 rounded-full bg-up" />
-              </span>
-              <span className="text-xs font-medium text-muted">Live prices</span>
+              <FeedStatusDot />
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="tabular hidden items-baseline gap-2 rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs sm:flex">

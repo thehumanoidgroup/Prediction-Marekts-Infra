@@ -90,3 +90,27 @@ body {
 .animate-live {
   animation: pp-pulse 2s ease-in-out infinite;
 }
+
+/* One-shot tick flashes for live price updates. */
+@keyframes pp-flash-up {
+  0% {
+    color: var(--color-up);
+  }
+  100% {
+    color: inherit;
+  }
+}
+@keyframes pp-flash-down {
+  0% {
+    color: var(--color-down);
+  }
+  100% {
+    color: inherit;
+  }
+}
+.animate-flash-up {
+  animation: pp-flash-up 1s ease-out;
+}
+.animate-flash-down {
+  animation: pp-flash-down 1s ease-out;
+}

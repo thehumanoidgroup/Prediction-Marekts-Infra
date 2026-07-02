@@ -14,11 +14,13 @@ from app.ws.manager import manager
 logger = logging.getLogger(__name__)
 
 # Demo instruments; replaced by the real matching engine's trade feed.
+# Ids match the frontend's seeded markets so connected clients see cards
+# tick in real time.
 DEMO_MARKETS: dict[str, float] = {
-    "mkt-btc-150k": 0.42,
-    "mkt-fed-sept-cut": 0.68,
-    "mkt-spx-7000": 0.58,
-    "mkt-nvda-6t": 0.56,
+    "mkt-1": 0.42,   # BTC above $150K
+    "mkt-4": 0.56,   # NVDA $6T market cap
+    "mkt-11": 0.68,  # Fed September cut
+    "mkt-14": 0.58,  # S&P 500 above 7,000
 }
 
 

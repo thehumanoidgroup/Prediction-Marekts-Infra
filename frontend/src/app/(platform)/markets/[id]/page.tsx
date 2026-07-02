@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { IconChevronLeft, IconClock, IconUsers } from "@/components/ui/icons";
 import { PriceChart } from "@/components/charts/price-chart";
+import { LiveProbability } from "@/components/markets/live-price";
 import { TradePanel } from "@/components/markets/trade-panel";
 import { cn } from "@/lib/utils";
 
@@ -77,9 +78,11 @@ export default async function MarketDetailPage({
         <div className="text-right">
           <p className="text-[11px] font-medium text-faint">YES probability</p>
           <div className="flex items-baseline justify-end gap-2">
-            <span className="tabular text-3xl font-bold tracking-tight">
-              {Math.round(market.yesPrice * 100)}%
-            </span>
+            <LiveProbability
+              marketId={market.id}
+              initialPrice={market.yesPrice}
+              className="text-3xl font-bold tracking-tight"
+            />
             <span className={cn("tabular text-sm font-semibold", up ? "text-up" : "text-down")}>
               {up ? "+" : "−"}
               {Math.abs(Math.round(market.change24h * 100))}¢ 24h

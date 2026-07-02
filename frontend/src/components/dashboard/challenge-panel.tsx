@@ -2,7 +2,7 @@ import type { ChallengeAccount } from "@/lib/types";
 import { formatUsd } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { IconCheck } from "@/components/ui/icons";
+import { IconCheck, IconShield } from "@/components/ui/icons";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
@@ -12,14 +12,29 @@ function formatObjectiveValue(value: number, unit: string): string {
   return `${value}`;
 }
 
-/** Challenge rules tracker — profit target, loss limits, trading days. */
-export function ObjectivesCard({ account }: { account: ChallengeAccount }) {
+/**
+ * Challenge progress panel: objectives plus a live drawdown status meter
+ * showing how much buffer remains before the account fails.
+ */
+export function ChallengePanel({ account }: { account: ChallengeAccount }) {
   const metCount = account.objectives.filter((o) => o.met).length;
+
+  // Static drawdown policy: the floor sits a fixed % below start.
+  const drawdownAmount = (account.maxDrawdownPct / 100) * account.startingBalance;
+  const floor = account.startingBalance - drawdownAmount;
+  const buffer = account.equity - floor;
+  const bufferPct = Math.min(100, Math.max(0, (buffer / drawdownAmount) * 100));
+  const health =
+    bufferPct > 50
+      ? { label: "Healthy", tone: "up" as const, text: "text-up" }
+      : bufferPct > 20
+        ? { label: "Caution", tone: "warn" as const, text: "text-warn" }
+        : { label: "At risk", tone: "down" as const, text: "text-down" };
 
   return (
     <Card className="flex flex-col">
       <CardHeader
-        title="Challenge objectives"
+        title="Challenge progress"
         subtitle={`${account.label} · Day ${account.daysTraded}`}
         action={
           <Badge tone={metCount === account.objectives.length ? "up" : "neutral"}>
@@ -28,6 +43,33 @@ export function ObjectivesCard({ account }: { account: ChallengeAccount }) {
         }
       />
       <CardBody className="flex flex-1 flex-col gap-4">
+        {/* Drawdown status */}
+        <div className="rounded-lg border border-edge bg-surface-2 p-3">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <IconShield className="text-sm text-muted" />
+              Drawdown status
+            </span>
+            <Badge tone={health.tone}>{health.label}</Badge>
+          </div>
+          <Progress value={bufferPct} tone={health.tone} className="mt-2.5" />
+          <div className="tabular mt-2 flex justify-between text-[11px] text-faint">
+            <span>
+              Floor <span className="font-semibold text-muted">{formatUsd(floor)}</span>
+            </span>
+            <span>
+              Buffer{" "}
+              <span className={cn("font-semibold", health.text)}>
+                {formatUsd(Math.max(0, buffer))}
+              </span>
+            </span>
+            <span>
+              Equity <span className="font-semibold text-muted">{formatUsd(account.equity)}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Objectives */}
         {account.objectives.map((objective) => {
           const pct = objective.target > 0 ? (objective.current / objective.target) * 100 : 0;
           // For inverted objectives (loss limits) filling the bar is bad.
@@ -66,8 +108,8 @@ export function ObjectivesCard({ account }: { account: ChallengeAccount }) {
           );
         })}
         <p className="mt-auto border-t border-edge pt-3 text-[11px] leading-relaxed text-faint">
-          Breaching a loss limit fails the challenge. Objectives update in real time as positions
-          are marked to market.
+          Breaching the drawdown floor or a daily loss limit fails the challenge. Metrics update
+          in real time as positions are marked to market.
         </p>
       </CardBody>
     </Card>

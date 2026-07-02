@@ -99,12 +99,14 @@ export interface ChallengeAccount {
 
 export interface JournalEntry {
   id: string;
-  marketId: string;
-  marketQuestion: string;
-  outcome: Outcome;
-  side: "buy" | "sell";
-  shares: number;
-  price: number;
+  /** "trade" entries record fills; "note" entries are freeform notes. */
+  kind: "trade" | "note";
+  marketId: string | null;
+  marketQuestion: string | null;
+  outcome: Outcome | null;
+  side: "buy" | "sell" | null;
+  shares: number | null;
+  price: number | null;
   pnl: number | null;
   note: string;
   tags: string[];

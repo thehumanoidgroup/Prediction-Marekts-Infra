@@ -48,20 +48,28 @@ export default async function JournalPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={entry.outcome === "yes" ? "up" : "down"}>
-                        {entry.side.toUpperCase()} {entry.outcome.toUpperCase()}
-                      </Badge>
-                      <span className="tabular text-xs text-muted">
-                        {formatShares(entry.shares)} @ {formatCents(entry.price)}
-                      </span>
+                      {entry.kind === "trade" && entry.side && entry.outcome ? (
+                        <Badge tone={entry.outcome === "yes" ? "up" : "down"}>
+                          {entry.side.toUpperCase()} {entry.outcome.toUpperCase()}
+                        </Badge>
+                      ) : (
+                        <Badge>NOTE</Badge>
+                      )}
+                      {entry.shares !== null && entry.price !== null ? (
+                        <span className="tabular text-xs text-muted">
+                          {formatShares(entry.shares)} @ {formatCents(entry.price)}
+                        </span>
+                      ) : null}
                       <span className="text-xs text-faint">{formatDateTime(entry.executedAt)}</span>
                     </div>
-                    <Link
-                      href={`/markets/${entry.marketId}`}
-                      className="mt-2 block text-sm font-medium text-foreground transition-colors hover:text-accent"
-                    >
-                      {entry.marketQuestion}
-                    </Link>
+                    {entry.marketId && entry.marketQuestion ? (
+                      <Link
+                        href={`/markets/${entry.marketId}`}
+                        className="mt-2 block text-sm font-medium text-foreground transition-colors hover:text-accent"
+                      >
+                        {entry.marketQuestion}
+                      </Link>
+                    ) : null}
                     {entry.note ? (
                       <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{entry.note}</p>
                     ) : null}
@@ -79,7 +87,7 @@ export default async function JournalPage() {
                     ) : null}
                   </div>
                   <div className="text-right">
-                    {isOpen ? (
+                    {entry.kind === "note" ? null : isOpen ? (
                       <Badge tone="accent">Open</Badge>
                     ) : (
                       <p className={cn("tabular text-sm font-bold", up ? "text-up" : "text-down")}>

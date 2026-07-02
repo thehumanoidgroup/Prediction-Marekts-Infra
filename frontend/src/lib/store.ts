@@ -239,6 +239,7 @@ function generateTenantState(tenantId: string, markets: Market[], now: number): 
     const win = rng() > 0.42;
     return {
       id: `jnl-${tenantId}-${i + 1}`,
+      kind: "trade" as const,
       marketId: market.id,
       marketQuestion: market.question,
       outcome,
