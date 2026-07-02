@@ -1,90 +1,137 @@
 # PropPredict
 
-A professional, white-label **prediction markets platform for prop firms**. Each firm gets a fully branded trading environment — evaluation challenges, real-money-style market trading, equity curves, a trading journal, and leaderboards — served from a single deployment.
+A professional, white-label **prediction markets platform for prop firms**. Each firm gets a fully branded trading environment — evaluation challenges, prediction market trading, equity curves, a trading journal, and leaderboards — served from a single deployment.
 
-## Quick start
+## Stack
+
+| Layer | Technology |
+| --- | --- |
+| Frontend | Next.js 15 (App Router, React 19), Tailwind CSS v4, shadcn/ui conventions, Recharts |
+| Backend | FastAPI (Python 3.12), SQLAlchemy 2 (async), Alembic |
+| Database | PostgreSQL 17 (SQLite fallback for bare local dev) |
+| Cache / Pub-Sub | Redis 7 |
+| Real-time | WebSockets (per-tenant channels, Redis-backed fan-out) |
+| Auth | JWT (bearer) with roles: `Trader`, `PropFirmAdmin`, `SuperAdmin` |
+| Deployment | Docker + docker-compose |
+
+## Project structure
+
+```
+.
+├── docker-compose.yml         # postgres + redis + backend + frontend
+├── .env.example               # copy to .env
+├── backend/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── alembic/               # database migrations
+│   └── app/
+│       ├── main.py            # FastAPI app factory, CORS, lifespan (seed, ticker)
+│       ├── core/
+│       │   ├── config.py      # pydantic-settings (PP_* env vars)
+│       │   └── security.py    # JWT issue/verify, password hashing
+│       ├── db/
+│       │   ├── session.py     # async engine + request-scoped sessions
+│       │   └── seed.py        # idempotent dev seed (tenants + demo users)
+│       ├── models/            # SQLAlchemy: Tenant, User (+ roles)
+│       ├── schemas/           # Pydantic request/response models
+│       ├── api/
+│       │   ├── deps.py        # tenant resolution, current user, role guards
+│       │   └── routes/        # auth, tenants (theming), health, ws
+│       └── ws/
+│           ├── manager.py     # tenant-aware WebSocket fan-out via Redis pub/sub
+│           └── ticker.py      # demo market price broadcaster
+└── frontend/
+    ├── Dockerfile
+    ├── components.json        # shadcn/ui configuration
+    └── src/
+        ├── middleware.ts      # tenant resolution: query → subdomain → cookie
+        ├── lib/               # tenant registry, domain types, services, formatting
+        ├── app/
+        │   ├── layout.tsx     # injects tenant brand CSS variables on <html>
+        │   ├── (platform)/    # dashboard, markets, portfolio, journal, leaderboard, settings
+        │   └── api/           # demo REST endpoints (markets, orders, portfolio…)
+        └── components/        # ui primitives, app shell, charts, dashboard, markets
+```
+
+## Quick start (Docker)
 
 ```bash
+cp .env.example .env
+docker compose up --build
+```
+
+- Frontend: [http://localhost:3000](http://localhost:3000)
+- API: [http://localhost:8000](http://localhost:8000) · interactive docs at [/docs](http://localhost:8000/docs)
+- Postgres: `localhost:5432` · Redis: `localhost:6379`
+
+On first boot the backend creates tables and seeds two demo firms (`app`, `apex`) with one user per role.
+
+## Local development (without Docker)
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Without `PP_DATABASE_URL` set, the backend falls back to a local SQLite file so it runs with zero infrastructure. Point it at Postgres with:
+
+```bash
+export PP_DATABASE_URL=postgresql+asyncpg://proppredict:proppredict@localhost:5432/proppredict
+```
+
+### Frontend
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The app ships with deterministic seeded demo data, so every page is fully populated out of the box.
+## Demo credentials
 
-### Trying multi-tenancy locally
+Seeded in development (password for all: `demo-password-123`):
 
-Tenants are resolved per request by the middleware. Locally, switch firms with the query param (persisted to a cookie) or the firm switcher in the top bar:
-
-- `http://localhost:3000/?tenant=proppredict` — PropPredict (green)
-- `http://localhost:3000/?tenant=apex` — Apex Forecast (sky blue)
-- `http://localhost:3000/?tenant=nova` — Nova Markets (violet)
-
-In production, each firm lives on its own subdomain (`apex.proppredict.com`), which the same middleware resolves automatically.
-
-## Architecture
-
-```
-src/
-├── middleware.ts             # Tenant resolution: query → subdomain → cookie → default
-├── lib/
-│   ├── tenants.ts            # White-label registry: branding, features, program rules
-│   ├── tenant-server.ts      # Tenant accessor for server components
-│   ├── tenant-request.ts     # Tenant accessor for API routes
-│   ├── types.ts              # Domain model (markets, positions, challenges, journal…)
-│   ├── store.ts              # Seeded in-memory store (stands in for Postgres + matching engine)
-│   ├── services.ts           # Tenant-scoped service layer — the only data API pages use
-│   ├── rng.ts                # Deterministic PRNG for reproducible demo data
-│   └── format.ts             # Consistent number/date/price formatting
-├── app/
-│   ├── layout.tsx            # Injects tenant brand CSS variables on <html>
-│   ├── (platform)/           # Dashboard, markets, portfolio, journal, leaderboard, settings
-│   └── api/                  # REST endpoints: markets, orders, portfolio, leaderboard, tenant
-└── components/
-    ├── layout/               # App shell: sidebar, topbar, mobile bottom nav
-    ├── charts/               # Recharts equity curve + market price charts
-    ├── dashboard/            # Stat cards, objectives tracker, positions table, movers
-    ├── markets/              # Market cards, filters, order ticket
-    └── ui/                   # Primitives: card, button, badge, progress, sparkline, icons
-```
-
-### Multi-tenancy & white-labeling
-
-- **Resolution** happens once per request in `src/middleware.ts` and is forwarded via the `x-tenant-id` header — server components, layouts, and API routes all read the same resolved tenant.
-- **Branding** is applied as CSS variables (`--tenant-accent`, etc.) on `<html>`; every accent-colored element in the design system derives from those tokens, so a firm is re-skinned with zero component changes.
-- **Feature flags** (`journal`, `leaderboard`, `payouts`) gate navigation and routes per firm.
-- **Program rules** (profit target, loss limits, profit split, account sizes) come from the tenant config and drive the challenge objectives shown on the dashboard.
-
-Adding a firm = one entry in the tenant registry. In production the registry would live in a database behind an admin panel; the `TenantConfig` shape is the contract the rest of the app codes against.
-
-### Data layer
-
-The in-memory store (`src/lib/store.ts`) is deliberately isolated behind a service layer (`src/lib/services.ts`): pages and API routes never touch storage directly, so swapping in Postgres and a real matching engine is a single-module change. Demo data is generated with a seeded PRNG, so charts, positions, and stats are stable across restarts and renders.
-
-### API
-
-| Endpoint | Method | Description |
+| Role | Email | Tenant |
 | --- | --- | --- |
-| `/api/markets` | GET | List markets (`?category=`, `?q=`, `?sort=volume\|movers\|closing`) |
-| `/api/markets/:id` | GET | Market detail with price history |
-| `/api/orders` | POST | Fill a market order `{ marketId, outcome, side, shares }` |
-| `/api/portfolio` | GET | Account, enriched positions, and trade statistics |
-| `/api/leaderboard` | GET | Tenant leaderboard |
-| `/api/tenant` | GET | Resolved tenant config |
+| Trader | `trader@app.proppredict.com` | PropPredict (`app`) |
+| PropFirmAdmin | `admin@app.proppredict.com` | PropPredict (`app`) |
+| SuperAdmin | `root@proppredict.com` | platform-wide |
+| Trader | `trader@apex.proppredict.com` | Apex Forecast (`apex`) |
+| PropFirmAdmin | `admin@apex.proppredict.com` | Apex Forecast (`apex`) |
 
-All endpoints are tenant-scoped via the middleware.
+## Multi-tenancy & white-labeling
 
-## Stack
+- **Backend:** every request resolves a tenant from the `X-Tenant-Slug` header (or the subdomain in production) via the `get_current_tenant` dependency. JWTs embed the tenant id; a token minted for one firm is rejected on another firm's domain. All tenant-owned tables carry a `tenant_id` foreign key.
+- **Theming:** `GET /api/v1/tenants/current` returns the firm's white-label config (colors, logo, name, feature flags, program rules). The frontend applies branding as CSS variables on `<html>`, so the entire UI re-skins per firm with zero component changes. Firm admins update their theme via `PATCH /api/v1/tenants/current`.
+- **Roles:** `Trader` (trades markets), `PropFirmAdmin` (manages one firm's traders, branding, and program), `SuperAdmin` (onboards firms platform-wide). Enforced by the `require_roles(...)` dependency; SuperAdmin implicitly passes every check.
 
-- **Next.js 15** (App Router, React 19, server components)
-- **Tailwind CSS v4** (CSS-variable theme tokens for white-labeling)
-- **Recharts** for equity and probability charts
-- **TypeScript** end to end
+## API overview
 
-## Scripts
+| Endpoint | Method | Auth | Description |
+| --- | --- | --- | --- |
+| `/health` | GET | — | Liveness probe |
+| `/api/v1/auth/register` | POST | — | Trader signup (tenant-scoped) |
+| `/api/v1/auth/login` | POST | — | Login → JWT |
+| `/api/v1/auth/me` | GET | any role | Current user |
+| `/api/v1/tenants/current` | GET | — | White-label config for the requesting firm |
+| `/api/v1/tenants/current` | PATCH | PropFirmAdmin | Update branding / features / program |
+| `/api/v1/tenants` | GET/POST | SuperAdmin | List / onboard firms |
+| `/ws/markets/{tenant_slug}` | WS | — | Real-time price ticks (per-tenant channel) |
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start the dev server |
-| `npm run build` | Production build (includes type checking) |
-| `npm run start` | Serve the production build |
-| `npm run typecheck` | Type-check without emitting |
+## Real-time pipeline
+
+`app/ws/ticker.py` broadcasts simulated price ticks through the same path production trades will take: **publisher → Redis pub/sub → every API replica → tenant's WebSocket clients**. Without Redis (bare local dev) fan-out degrades gracefully to in-process delivery.
+
+## Migrations
+
+```bash
+cd backend
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
+
+In development the app auto-creates tables on startup; production should rely on Alembic only.
