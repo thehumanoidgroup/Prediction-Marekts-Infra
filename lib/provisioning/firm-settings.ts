@@ -23,6 +23,7 @@ import {
   type PropFirmSettingsRecord,
 } from "@/types/firm-settings";
 import type { AccountSize, PropFirmModelType } from "@/types/provisioning";
+import { ProvisioningError } from "@/lib/provisioning/errors";
 
 function usdToAccountSize(usd: number): AccountSize | null {
   const map: Record<number, AccountSize> = {
@@ -186,14 +187,28 @@ export function validateProvisioningAgainstSettings(
   accountSize: AccountSize,
 ): void {
   if (!settings.allowedModelTypes.includes(modelType)) {
-    throw new Error(
-      `Model type "${modelType}" is not enabled for this prop firm. Allowed: ${settings.allowedModelTypes.join(", ")}`,
-    );
+    throw new ProvisioningError({
+      code: "MODEL_TYPE_NOT_ALLOWED",
+      message: `Model type "${modelType}" is not enabled for this prop firm.`,
+      userMessage: `This firm does not sell ${modelType} evaluations. Allowed types: ${settings.allowedModelTypes.join(", ")}.`,
+      status: 422,
+      details: {
+        modelType,
+        allowedModelTypes: settings.allowedModelTypes,
+      },
+    });
   }
   if (!settings.allowedAccountSizes.includes(accountSize)) {
-    throw new Error(
-      `Account size "${accountSize}" is not sold by this prop firm. Allowed: ${settings.allowedAccountSizes.join(", ")}`,
-    );
+    throw new ProvisioningError({
+      code: "ACCOUNT_SIZE_NOT_ALLOWED",
+      message: `Account size "${accountSize}" is not sold by this prop firm.`,
+      userMessage: `This firm does not offer ${accountSize} accounts. Allowed sizes: ${settings.allowedAccountSizes.join(", ")}.`,
+      status: 422,
+      details: {
+        accountSize,
+        allowedAccountSizes: settings.allowedAccountSizes,
+      },
+    });
   }
 }
 

@@ -97,6 +97,13 @@ Resolution order at provisioning: platform preset → `Tenant.program` → `Prop
 
 Configure from **Prop Firm Admin → Provisioning** (`/admin/provisioning`) or `PATCH /api/admin/provisioning-settings`.
 
+## Security and validation
+
+- **Credential encryption:** `TraderDemoAccount.login_credentials` are encrypted with AES-256-GCM (`lib/provisioning/crypto.ts`). Set `CREDENTIALS_ENCRYPTION_KEY` in production.
+- **`custom_rules` validation:** Flat JSON only; known fields with type/range checks (`lib/schemas/custom-rules.ts`). Unknown keys and nested objects are rejected.
+- **Audit logging:** Every provisioning attempt is recorded in `provisioning_audit_logs` (success, failed, queued).
+- **Webhook rate limiting:** Configurable per firm + API key + IP (`PROVISIONING_WEBHOOK_RATE_LIMIT`, default 60/min).
+
 ## API routes
 
 | Route | Method | Auth | Purpose |

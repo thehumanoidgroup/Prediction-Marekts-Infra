@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   enqueueProvisioningJob,
   shouldUseAsyncQueue,
 } from "@/lib/provisioning/queue";
+import { logProvisioningAudit } from "@/lib/provisioning/audit";
 import type { ProvisionNewAccountInput } from "@/services/account-provisioning";
 import { provisionNewAccount } from "@/services/account-provisioning";
 
@@ -24,7 +25,21 @@ export async function executeProvisioningRequest(
         ...input,
         source,
         provisionedBy: input.provisionedBy,
+        auditContext: input.auditContext,
       },
+    });
+
+    await logProvisioningAudit({
+      propFirmId: input.propFirmId,
+      traderEmail: input.traderEmail,
+      modelType: input.modelType,
+      accountSize: input.accountSize,
+      source,
+      status: "queued",
+      apiKeyId: input.auditContext?.apiKeyId,
+      actorUserId: input.auditContext?.actorUserId ?? input.provisionedBy,
+      ipAddress: input.auditContext?.ipAddress ?? null,
+      metadata: { jobId: job.id },
     });
 
     return NextResponse.json(
@@ -32,6 +47,8 @@ export async function executeProvisioningRequest(
         job,
         status: "pending",
         message: "Provisioning queued for background processing",
+        userMessage:
+          "Your request was accepted and is being processed. Poll the job endpoint for status.",
       },
       { status: 202 },
     );
@@ -49,6 +66,7 @@ export async function executeProvisioningRequest(
       riskProfile: result.riskProfile,
       credentialsFingerprint: result.credentialsFingerprint,
       emails: result.emails,
+      userMessage: `Account provisioned successfully for ${result.account.traderEmail}.`,
       ...(result.emails?.trader.sent ? {} : { credentials: result.credentials }),
     },
     { status: 201 },

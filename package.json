@@ -7,6 +7,8 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "prisma db push"
@@ -34,6 +36,7 @@
     "postcss": "^8.5.16",
     "prisma": "^6.19.0",
     "tailwindcss": "^4.3.2",
-    "typescript": "5.9"
+    "typescript": "5.9",
+    "vitest": "^3.2.4"
   }
 }

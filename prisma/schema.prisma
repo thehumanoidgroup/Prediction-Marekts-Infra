@@ -223,3 +223,28 @@ model ProvisioningJob {
   @@index([status, createdAt])
   @@map("provisioning_jobs")
 }
+
+/// Immutable audit trail for every provisioning attempt.
+model ProvisioningAuditLog {
+  id                     String            @id @default(uuid())
+  propFirmAccountId      String?           @map("prop_firm_account_id")
+  propFirmId             String            @map("prop_firm_id")
+  traderEmail            String            @map("trader_email")
+  modelType              PropFirmModelType @map("model_type")
+  accountSize            AccountSize       @map("account_size")
+  source                 String
+  status                 String
+  credentialsFingerprint String?           @map("credentials_fingerprint")
+  apiKeyId               String?           @map("api_key_id")
+  actorUserId            String?           @map("actor_user_id")
+  ipAddress              String?           @map("ip_address")
+  errorCode              String?           @map("error_code")
+  errorMessage           String?           @map("error_message") @db.Text
+  metadata               Json              @default("{}")
+  createdAt              DateTime          @default(now()) @map("created_at")
+
+  @@index([propFirmId, createdAt(sort: Desc)])
+  @@index([propFirmAccountId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("provisioning_audit_logs")
+}

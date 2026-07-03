@@ -18,6 +18,8 @@ import {
   logAccountProvisioned,
   logAccountProvisioningFailed,
 } from "@/lib/platform/activity";
+import { logProvisioningAudit } from "@/lib/provisioning/audit";
+import { ProvisioningError, provisioningErrorBody } from "@/lib/provisioning/errors";
 import { ensureSeeded } from "@/lib/seed";
 import { encryptLoginCredentials } from "@/lib/provisioning/crypto";
 import {
@@ -53,6 +55,17 @@ import type {
   TraderLoginCredentials,
 } from "@/types/provisioning";
 
+interface ProvisioningAuditBase {
+  propFirmId: string;
+  traderEmail: string;
+  modelType: PropFirmModelType;
+  accountSize: AccountSize;
+  source: "webhook" | "manual" | "job";
+  apiKeyId?: string;
+  actorUserId?: string;
+  ipAddress?: string | null;
+}
+
 const accountInclude = {
   challengeConfig: true,
   traderDemoAccount: true,
@@ -79,6 +92,12 @@ export interface ProvisionNewAccountInput {
   provisionedBy?: string;
   /** Skip duplicate activity log when async queue already logged enqueue. */
   skipActivityLog?: boolean;
+  /** Audit metadata (API key, admin user, IP). */
+  auditContext?: {
+    apiKeyId?: string;
+    actorUserId?: string;
+    ipAddress?: string | null;
+  };
 }
 
 export interface ProvisionNewAccountResult {
@@ -177,45 +196,64 @@ export async function provisionNewAccount(
   await ensureSeeded();
   await ensureRiskEngineHydrated();
 
-  const data = provisionNewAccountSchema.parse({
-    propFirmId: input.propFirmId,
-    traderEmail: input.traderEmail,
-    modelType: input.modelType,
-    accountSize: input.accountSize,
-    purchasedAt: input.purchasedAt,
-    customRules: input.customRules,
-    challengeConfigOverrides: input.challengeConfigOverrides,
-    loginMode: input.loginMode,
-    activateImmediately: input.activateImmediately,
-    sendEmails: input.sendEmails,
-  });
-
-  const firm = await prisma.tenant.findUnique({ where: { id: data.propFirmId } });
-  if (!firm) {
-    throw new Error("Prop firm not found.");
-  }
-
-  const firmConfig = tenantRowToConfig(firm);
-  const firmSettings = await getOrCreateFirmSettings(data.propFirmId, firmConfig.program);
-
-  validateProvisioningAgainstSettings(firmSettings, data.modelType, data.accountSize);
-
-  const challengeConfig = resolveChallengeConfigForAccount({
-    propFirmId: data.propFirmId,
-    modelType: data.modelType,
-    accountSize: data.accountSize,
-    customRules: data.customRules,
-    challengeConfigOverrides: data.challengeConfigOverrides,
-    firmProgram: firmConfig.program,
-    firmSettings,
-  });
-
-  const virtualBalance = defaultVirtualBalance(data.accountSize);
-  const traderEmail = data.traderEmail.toLowerCase();
-  const now = new Date();
   const source = input.source ?? "job";
+  let auditBase: ProvisioningAuditBase | null = null;
 
-  // Step 1–2: Create account shell, challenge config, and encrypted credentials.
+  try {
+    const data = provisionNewAccountSchema.parse({
+      propFirmId: input.propFirmId,
+      traderEmail: input.traderEmail,
+      modelType: input.modelType,
+      accountSize: input.accountSize,
+      purchasedAt: input.purchasedAt,
+      customRules: input.customRules,
+      challengeConfigOverrides: input.challengeConfigOverrides,
+      loginMode: input.loginMode,
+      activateImmediately: input.activateImmediately,
+      sendEmails: input.sendEmails,
+    });
+
+    const traderEmail = data.traderEmail.toLowerCase();
+    auditBase = {
+      propFirmId: data.propFirmId,
+      traderEmail,
+      modelType: data.modelType,
+      accountSize: data.accountSize,
+      source,
+      apiKeyId: input.auditContext?.apiKeyId,
+      actorUserId: input.auditContext?.actorUserId ?? input.provisionedBy,
+      ipAddress: input.auditContext?.ipAddress ?? null,
+    };
+
+    const firm = await prisma.tenant.findUnique({ where: { id: data.propFirmId } });
+    if (!firm) {
+      throw new ProvisioningError({
+        code: "FIRM_NOT_FOUND",
+        message: "Prop firm not found.",
+        userMessage: "The selected prop firm does not exist or is inactive.",
+        status: 404,
+      });
+    }
+
+    const firmConfig = tenantRowToConfig(firm);
+    const firmSettings = await getOrCreateFirmSettings(data.propFirmId, firmConfig.program);
+
+    validateProvisioningAgainstSettings(firmSettings, data.modelType, data.accountSize);
+
+    const challengeConfig = resolveChallengeConfigForAccount({
+      propFirmId: data.propFirmId,
+      modelType: data.modelType,
+      accountSize: data.accountSize,
+      customRules: data.customRules,
+      challengeConfigOverrides: data.challengeConfigOverrides,
+      firmProgram: firmConfig.program,
+      firmSettings,
+    });
+
+    const virtualBalance = defaultVirtualBalance(data.accountSize);
+    const now = new Date();
+
+    // Step 1–2: Create account shell, challenge config, and encrypted credentials.
   const row = await prisma.$transaction(async (tx) => {
     const account = await tx.propFirmAccount.create({
       data: {
@@ -342,15 +380,36 @@ export async function provisionNewAccount(
     });
   }
 
-  return {
-    account: accountRecord,
-    riskProfile,
-    credentials: row.generated.delivery,
-    credentialsFingerprint: credentialsFingerprint(
+    const fingerprint = credentialsFingerprint(
       row.generated.delivery.password ?? row.row.id,
-    ),
-    emails,
-  };
+    );
+
+    await logProvisioningAudit({
+      ...auditBase!,
+      status: "success",
+      propFirmAccountId: accountRecord.id,
+      credentialsFingerprint: fingerprint,
+    });
+
+    return {
+      account: accountRecord,
+      riskProfile,
+      credentials: row.generated.delivery,
+      credentialsFingerprint: fingerprint,
+      emails,
+    };
+  } catch (error) {
+    if (auditBase) {
+      const body = provisioningErrorBody(error);
+      await logProvisioningAudit({
+        ...auditBase,
+        status: "failed",
+        errorCode: body.code,
+        errorMessage: body.error,
+      });
+    }
+    throw error;
+  }
 }
 
 /** Re-apply stored challenge config to the risk engine (e.g. after server restart). */

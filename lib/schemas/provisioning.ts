@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { customRulesSchema } from "@/lib/schemas/custom-rules";
 
 const modelTypeSchema = z.enum(["1step", "2step", "3step", "instant"]);
 
@@ -57,7 +58,7 @@ export const provisionNewAccountSchema = z.object({
   modelType: modelTypeSchema,
   accountSize: accountSizeSchema,
   purchasedAt: z.coerce.date().optional(),
-  customRules: z.record(z.string(), z.unknown()).optional(),
+  customRules: customRulesSchema,
   challengeConfigOverrides: challengeConfigOverridesSchema.optional(),
   loginMode: z.enum(["password", "magic_link"]).default("password"),
   activateImmediately: z.boolean().default(false),
@@ -72,7 +73,7 @@ export const provisioningWebhookSchema = z
     trader_email: z.string().email().max(320),
     model_type: modelTypeSchema,
     account_size: accountSizeSchema,
-    custom_rules: z.record(z.string(), z.unknown()).optional(),
+    custom_rules: customRulesSchema,
     purchased_at: z.coerce.date().optional(),
     async: z.boolean().optional(),
     activate_immediately: z.boolean().optional(),
@@ -101,8 +102,8 @@ export const provisioningManualSchema = z
     model_type: modelTypeSchema.optional(),
     accountSize: accountSizeSchema.optional(),
     account_size: accountSizeSchema.optional(),
-    customRules: z.record(z.string(), z.unknown()).optional(),
-    custom_rules: z.record(z.string(), z.unknown()).optional(),
+    customRules: customRulesSchema,
+    custom_rules: customRulesSchema,
     challengeConfigOverrides: challengeConfigOverridesSchema.optional(),
     challenge_config_overrides: challengeConfigOverridesSchema.optional(),
     loginMode: z.enum(["password", "magic_link"]).optional(),

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { listPropFirmAccounts } from "@/lib/provisioning/accounts";
 import {
   isAuthError,
@@ -6,6 +7,7 @@ import {
   requireSuperAdmin,
 } from "@/lib/provisioning/route-auth";
 import { listProvisioningAccountsQuerySchema } from "@/lib/schemas/provisioning";
+import { provisioningValidationResponse } from "@/lib/provisioning/errors";
 import { ensureSeeded } from "@/lib/seed";
 import type { PropFirmAccountRecord } from "@/types/provisioning";
 
@@ -28,8 +30,15 @@ export async function GET(request: NextRequest) {
   try {
     query = listProvisioningAccountsQuerySchema.parse(params);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid query";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof ZodError) return provisioningValidationResponse(error);
+    return NextResponse.json(
+      {
+        code: "VALIDATION_ERROR",
+        error: "Invalid query parameters",
+        userMessage: "One or more filter parameters are invalid.",
+      },
+      { status: 400 },
+    );
   }
 
   const result = await listPropFirmAccounts({
