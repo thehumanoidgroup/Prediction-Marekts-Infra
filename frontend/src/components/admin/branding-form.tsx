@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { notifyThemeUpdated } from "@/components/theme/tenant-theme";
 import type { TenantConfig } from "@/lib/tenants";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,8 @@ export function BrandingForm({ tenant }: { tenant: TenantConfig }) {
         setMessage({ ok: false, text: body.error ?? "Save failed" });
         return;
       }
+      const body = (await response.json()) as { tenant: TenantConfig };
+      notifyThemeUpdated(body.tenant);
       setMessage({ ok: true, text: "Branding saved — theme applied platform-wide" });
       router.refresh();
     } catch {

@@ -1,13 +1,9 @@
 /**
- * White-label tenant registry.
+ * White-label tenant registry (fallback when the backend is unavailable).
  *
- * Each prop firm running on PropPredict gets a tenant entry. A tenant is
- * resolved per-request (subdomain, `x-tenant` header, or `tenant` cookie —
- * see `src/middleware.ts`) and its branding is injected as CSS variables in
- * the root layout, so the entire UI re-skins itself without code changes.
- *
- * In production this registry would live in a database with an admin UI;
- * the shape below is the contract the rest of the app codes against.
+ * In production the database is the source of truth — see
+ * `GET /api/v1/tenants/current` and `src/lib/tenant-server.ts`.
+ * This registry provides stable client ids, slug aliases, and offline defaults.
  */
 
 export type DrawdownMode = "static" | "trailing" | "absolute";

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_TENANT_ID, getTenant, getTenantBySlug } from "@/lib/tenants";
 
 export const TENANT_HEADER = "x-tenant-id";
+export const TENANT_SLUG_HEADER = "x-tenant-slug";
 export const TENANT_COOKIE = "pp-tenant";
 
 /**
@@ -11,8 +12,7 @@ export const TENANT_COOKIE = "pp-tenant";
  *  3. `pp-tenant` cookie
  *  4. Default tenant
  *
- * The resolved id is forwarded via a request header so server components
- * and API routes can read it without re-deriving it.
+ * Forwards both client id and backend slug headers for downstream resolution.
  */
 export function middleware(request: NextRequest) {
   const queryTenant = request.nextUrl.searchParams.get("tenant");
@@ -20,18 +20,20 @@ export function middleware(request: NextRequest) {
   const subdomain = host.split(":")[0].split(".")[0];
   const cookieTenant = request.cookies.get(TENANT_COOKIE)?.value;
 
-  const resolved =
+  const resolvedId =
     (queryTenant && getTenant(queryTenant).id === queryTenant && queryTenant) ||
     getTenantBySlug(subdomain)?.id ||
     (cookieTenant && getTenant(cookieTenant).id === cookieTenant && cookieTenant) ||
     DEFAULT_TENANT_ID;
 
+  const tenant = getTenant(resolvedId);
   const headers = new Headers(request.headers);
-  headers.set(TENANT_HEADER, resolved);
+  headers.set(TENANT_HEADER, resolvedId);
+  headers.set(TENANT_SLUG_HEADER, tenant.slug);
 
   const response = NextResponse.next({ request: { headers } });
-  if (resolved !== cookieTenant) {
-    response.cookies.set(TENANT_COOKIE, resolved, {
+  if (resolvedId !== cookieTenant) {
+    response.cookies.set(TENANT_COOKIE, resolvedId, {
       path: "/",
       sameSite: "lax",
     });

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { CSSProperties, ReactNode } from "react";
+import { TenantTheme } from "@/components/theme/tenant-theme";
 import { getRequestTenant } from "@/lib/tenant-server";
 import "./globals.css";
 
@@ -24,11 +25,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   } as CSSProperties;
 
   return (
-    // Brand variables live on <html> so Tailwind theme tokens defined at
-    // :root (e.g. --color-accent: var(--tenant-accent)) resolve against the
-    // tenant override rather than the default palette.
     <html lang="en" style={brandVars}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        <TenantTheme tenant={tenant}>{children}</TenantTheme>
+      </body>
     </html>
   );
 }

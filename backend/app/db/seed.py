@@ -1,8 +1,4 @@
-"""Development seed data: demo tenants and one user per role.
-
-Idempotent — safe to run on every startup; production deployments manage
-tenants through the SuperAdmin API and Alembic migrations instead.
-"""
+"""Development seed data: demo tenants and one user per role."""
 
 import logging
 
@@ -19,6 +15,7 @@ DEMO_PASSWORD = "demo-password-123"  # noqa: S105 - development seed only
 SEED_TENANTS = [
     {
         "slug": "app",
+        "client_key": "proppredict",
         "name": "PropPredict",
         "tagline": "Trade predictions. Get funded.",
         "branding": {
@@ -35,11 +32,17 @@ SEED_TENANTS = [
             "profit_target_pct": 10,
             "max_daily_loss_pct": 5,
             "max_drawdown_pct": 10,
+            "drawdown_mode": "static",
             "profit_split_pct": 80,
+            "max_stake_per_order": 2_500,
+            "max_exposure_per_market": 5_000,
+            "challenge_duration_days": 60,
+            "min_trading_days": 10,
         },
     },
     {
         "slug": "apex",
+        "client_key": "apex",
         "name": "Apex Forecast",
         "tagline": "Elite forecasting capital.",
         "branding": {
@@ -56,7 +59,39 @@ SEED_TENANTS = [
             "profit_target_pct": 8,
             "max_daily_loss_pct": 4,
             "max_drawdown_pct": 8,
+            "drawdown_mode": "trailing",
             "profit_split_pct": 90,
+            "max_stake_per_order": 5_000,
+            "max_exposure_per_market": 10_000,
+            "challenge_duration_days": 45,
+            "min_trading_days": 7,
+        },
+    },
+    {
+        "slug": "nova",
+        "client_key": "nova",
+        "name": "Nova Markets",
+        "tagline": "Predict boldly. Trade funded.",
+        "branding": {
+            "accent": "#a78bfa",
+            "accent_hover": "#8b5cf6",
+            "accent_soft": "rgba(167, 139, 250, 0.12)",
+            "accent_foreground": "#120a24",
+            "logo_glyph": "N",
+        },
+        "features": {"leaderboard": True, "journal": False, "payouts": True},
+        "program": {
+            "currency": "USD",
+            "account_sizes": [10_000, 50_000, 100_000],
+            "profit_target_pct": 12,
+            "max_daily_loss_pct": 5,
+            "max_drawdown_pct": 12,
+            "drawdown_mode": "static",
+            "profit_split_pct": 75,
+            "max_stake_per_order": 2_000,
+            "max_exposure_per_market": 4_000,
+            "challenge_duration_days": 90,
+            "min_trading_days": 12,
         },
     },
 ]
@@ -92,7 +127,6 @@ async def seed_database(db: AsyncSession) -> None:
             ]
         )
 
-    # One platform operator, attached to the first tenant's slug for login.
     first = await db.execute(select(Tenant).where(Tenant.slug == "app"))
     app_tenant = first.scalar_one()
     db.add(

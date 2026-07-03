@@ -1,14 +1,12 @@
 """Trading API smoke tests."""
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-
-client = TestClient(app)
 HEADERS = {"X-Tenant-Slug": "app"}
 
 
-def test_list_markets():
+def test_list_markets(client: TestClient):
     response = client.get("/api/v1/trading/markets", headers=HEADERS)
     assert response.status_code == 200
     data = response.json()
@@ -17,7 +15,7 @@ def test_list_markets():
     assert "yesPrice" in data["markets"][0]
 
 
-def test_portfolio_and_order():
+def test_portfolio_and_order(client: TestClient):
     portfolio = client.get("/api/v1/trading/portfolio", headers=HEADERS)
     assert portfolio.status_code == 200
     body = portfolio.json()
@@ -36,7 +34,7 @@ def test_portfolio_and_order():
     assert after.json()["account"]["balance"] < body["account"]["balance"]
 
 
-def test_journal_note():
+def test_journal_note(client: TestClient):
     response = client.post(
         "/api/v1/trading/journal",
         headers=HEADERS,

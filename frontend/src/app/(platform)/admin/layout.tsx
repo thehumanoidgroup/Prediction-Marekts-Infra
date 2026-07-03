@@ -4,7 +4,10 @@ import { getRequestTenant } from "@/lib/tenant-server";
 import { Badge } from "@/components/ui/badge";
 import { AdminTabs } from "@/components/admin/admin-tabs";
 
-export const metadata: Metadata = { title: "Firm Admin" };
+export async function generateMetadata(): Promise<Metadata> {
+  const tenant = await getRequestTenant();
+  return { title: `Firm Admin · ${tenant.name}` };
+}
 
 /**
  * Firm admin area. In production this layout is gated to the

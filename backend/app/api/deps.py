@@ -78,6 +78,31 @@ async def get_trader_user(
     return user
 
 
+async def get_firm_admin_user(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant: Annotated[Tenant, Depends(get_current_tenant)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+) -> User:
+    """Returns the authenticated firm admin, or the demo admin when unauthenticated."""
+    if credentials is not None:
+        user = await get_current_user(db, tenant, credentials)
+        if user.role not in (UserRole.PROP_FIRM_ADMIN, UserRole.SUPER_ADMIN):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Requires firm admin role")
+        return user
+
+    result = await db.execute(
+        select(User).where(
+            User.tenant_id == tenant.id,
+            User.role == UserRole.PROP_FIRM_ADMIN,
+            User.is_active,
+        )
+    )
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No demo admin for tenant")
+    return user
+
+
 async def get_trader_session(
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
     user: Annotated[User, Depends(get_trader_user)],

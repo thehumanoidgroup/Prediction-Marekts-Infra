@@ -1,24 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { patchTenantConfig, fetchTenantConfig } from "@/lib/tenant-api";
 import { getEffectiveTenant, updateTenantSettings } from "@/lib/services";
-import { getTenantFromRequest } from "@/lib/tenant-request";
+import { getTenantFromRequest, getTenantSlugFromRequest } from "@/lib/tenant-request";
 import type { TenantOverrides } from "@/lib/store";
 
 /**
- * Firm admin settings endpoint. In production this maps to the FastAPI
- * `PATCH /api/v1/tenants/current` route and requires a PropFirmAdmin JWT;
- * the demo applies changes to the in-memory store directly.
+ * Firm admin settings endpoint — persists to Postgres via FastAPI when
+ * available, otherwise applies to the in-memory demo store.
  */
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
+  const slug = getTenantSlugFromRequest(request);
+  const remote = await fetchTenantConfig(slug);
+  if (remote) return NextResponse.json({ tenant: remote });
+
   const tenant = getTenantFromRequest(request);
   return NextResponse.json({ tenant: getEffectiveTenant(tenant.id) });
 }
 
-// ~1.5MB guard for uploaded logo data URLs.
 const MAX_LOGO_LENGTH = 2_000_000;
 
 export async function PATCH(request: NextRequest) {
   const tenant = getTenantFromRequest(request);
+  const slug = getTenantSlugFromRequest(request);
 
   let body: TenantOverrides;
   try {
@@ -39,6 +43,9 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Logo must be under ~1.5MB" }, { status: 400 });
     }
   }
+
+  const remote = await patchTenantConfig(slug, body);
+  if (remote) return NextResponse.json({ tenant: remote });
 
   const updated = updateTenantSettings(tenant.id, body);
   return NextResponse.json({ tenant: updated });

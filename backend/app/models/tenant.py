@@ -11,6 +11,7 @@ DEFAULT_BRANDING: dict[str, Any] = {
     "accent_soft": "rgba(34, 197, 94, 0.12)",
     "accent_foreground": "#04170b",
     "logo_glyph": "P",
+    "logo_url": None,
 }
 
 DEFAULT_FEATURES: dict[str, bool] = {
@@ -25,7 +26,12 @@ DEFAULT_PROGRAM: dict[str, Any] = {
     "profit_target_pct": 10,
     "max_daily_loss_pct": 5,
     "max_drawdown_pct": 10,
+    "drawdown_mode": "static",
     "profit_split_pct": 80,
+    "max_stake_per_order": 2_500,
+    "max_exposure_per_market": 5_000,
+    "challenge_duration_days": 60,
+    "min_trading_days": 10,
 }
 
 
@@ -41,6 +47,8 @@ class Tenant(Base, UUIDTimestampMixin):
 
     # Subdomain the firm is served from, e.g. `apex` → apex.proppredict.com
     slug: Mapped[str] = mapped_column(String(63), unique=True, index=True, nullable=False)
+    # Stable client identifier used by the frontend registry (e.g. `proppredict`).
+    client_key: Mapped[str] = mapped_column(String(63), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     tagline: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
