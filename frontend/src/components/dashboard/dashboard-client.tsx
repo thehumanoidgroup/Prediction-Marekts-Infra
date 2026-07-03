@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { ChallengePanel } from "@/components/dashboard/challenge-panel";
+import { DashboardMarketsSection } from "@/components/dashboard/dashboard-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { LivePositionsTable } from "@/components/dashboard/live-positions";
@@ -196,6 +197,8 @@ export function DashboardClient({
           </Card>
 
           <JournalCard entries={journalEntries} />
+
+          <DashboardMarketsSection />
         </div>
       </div>
     </div>

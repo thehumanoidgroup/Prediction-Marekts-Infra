@@ -36,6 +36,7 @@ def serialize_market(m: MarketRuntime) -> dict:
         "traders": m.traders,
         "closesAt": m.closes_at,
         "history": m.history,
+        "source": "internal",
     }
 
 

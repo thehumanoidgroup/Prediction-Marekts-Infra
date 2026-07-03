@@ -11,7 +11,7 @@ export default async function DashboardPage() {
 
   const remotePortfolio = await fetchBackendPortfolio(tenant.slug);
   const remoteJournal = await fetchBackendJournal(tenant.slug);
-  const remoteMarkets = await fetchBackendMarkets(tenant.slug, { sort: "movers" });
+  const remoteMarkets = await fetchBackendMarkets(tenant.slug, { sort: "movers", source: "internal" });
 
   const initial = remotePortfolio
     ? {

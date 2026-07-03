@@ -10,6 +10,12 @@ export type MarketCategory =
 
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
+/** Where a market's liquidity and pricing originate. */
+export type MarketSourceType = "internal" | "polymarket";
+
+/** Trader UI filter for which market feeds to display. */
+export type MarketViewSource = MarketSourceType | "all";
+
 export type Outcome = "yes" | "no";
 
 export interface PricePoint {
@@ -39,6 +45,49 @@ export interface Market {
   closesAt: number;
   resolvedOutcome?: Outcome;
   history: PricePoint[];
+  /** Liquidity source — internal LMSR simulator or external Polymarket CLOB. */
+  source: MarketSourceType;
+  externalConditionId?: string;
+  marketSlug?: string | null;
+  acceptingOrders?: boolean;
+  outcomes?: PolymarketOutcome[];
+}
+
+export interface PolymarketOutcome {
+  tokenId?: string;
+  label?: string;
+  price: number;
+  winner?: boolean;
+}
+
+export type PolymarketMarket = Market & {
+  source: "polymarket";
+  externalConditionId: string;
+};
+
+export interface HybridMarketsPayload {
+  markets: Market[];
+  source: MarketViewSource;
+  counts: { internal: number; polymarket: number };
+}
+
+export interface PolymarketIntegrationStatus {
+  provider: "polymarket";
+  enabled: boolean;
+  healthy: boolean;
+  host: string;
+  chainId: number;
+  authLevel: number;
+  authMode: string;
+  hasWallet: boolean;
+  hasApiCredentials: boolean;
+  canTrade: boolean;
+  redis: "connected" | "unavailable" | string;
+  clob: "connected" | "error" | "unknown" | string;
+  marketSampleSize: number | null;
+  latencyMs: number | null;
+  cachedMarketCount: number | null;
+  error: string | null;
 }
 
 export interface Position {

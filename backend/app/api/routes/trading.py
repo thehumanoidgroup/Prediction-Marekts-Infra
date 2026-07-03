@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_tenant, get_trader_session
 from app.models import Tenant
+from app.runtime.hybrid_markets import get_hybrid_market, list_hybrid_markets
 from app.runtime.serializers import (
     serialize_account,
     serialize_journal,
@@ -16,8 +17,11 @@ from app.runtime.serializers import (
 )
 from app.runtime.store import TraderSession, get_trading_store
 from app.ws.manager import manager
+from integrations.polymarket import PolymarketError
 
 router = APIRouter(prefix="/trading", tags=["trading"])
+
+MarketListingSource = Literal["internal", "polymarket", "all"]
 
 
 class PlaceOrderBody(BaseModel):
@@ -39,18 +43,23 @@ async def list_markets(
     category: str = Query("all"),
     q: str = Query(""),
     sort: str = Query("volume"),
+    source: MarketListingSource = Query(
+        "all",
+        description="Market feed: internal LMSR, polymarket CLOB, or all (hybrid)",
+    ),
 ) -> dict:
-    store = get_trading_store()
-    markets = store.list_markets(category=category, query=q, sort=sort)
-    return {"markets": [serialize_market(m) for m in markets]}
+    try:
+        return await list_hybrid_markets(category=category, query=q, sort=sort, source=source)
+    except PolymarketError as exc:
+        raise HTTPException(502, detail=str(exc)) from exc
 
 
 @router.get("/markets/{market_id}")
 async def get_market(market_id: str) -> dict:
-    market = get_trading_store().get_market(market_id)
+    market = await get_hybrid_market(market_id)
     if market is None:
         raise HTTPException(404, detail="Market not found")
-    return {"market": serialize_market(market)}
+    return {"market": market}
 
 
 @router.get("/portfolio")

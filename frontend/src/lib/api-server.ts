@@ -5,6 +5,7 @@ import type {
   Market,
   Order,
   Outcome,
+  PolymarketIntegrationStatus,
   PortfolioSummary,
   Position,
 } from "@/lib/types";
@@ -18,6 +19,22 @@ export interface PortfolioPayload {
 
 export interface MarketsPayload {
   markets: Market[];
+  source?: import("@/lib/types").MarketViewSource;
+  counts?: { internal: number; polymarket: number };
+}
+
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+export interface PolymarketMarketsPayload extends MarketsPayload {
+  pagination?: PaginationMeta;
+  query?: string;
 }
 
 export interface JournalPayload {
@@ -82,7 +99,12 @@ export async function fetchBackendPortfolio(tenantSlug: string): Promise<Portfol
 
 export async function fetchBackendMarkets(
   tenantSlug: string,
-  filters: { category?: string; query?: string; sort?: string } = {},
+  filters: {
+    category?: string;
+    query?: string;
+    sort?: string;
+    source?: import("@/lib/types").MarketViewSource;
+  } = {},
 ): Promise<MarketsPayload | null> {
   return backendFetch<MarketsPayload>("/markets", {
     tenantSlug,
@@ -90,12 +112,86 @@ export async function fetchBackendMarkets(
       category: filters.category ?? "all",
       q: filters.query ?? "",
       sort: filters.sort ?? "volume",
+      source: filters.source ?? "all",
     },
   });
 }
 
 export async function fetchBackendJournal(tenantSlug: string): Promise<JournalPayload | null> {
   return backendFetch<JournalPayload>("/journal", { tenantSlug });
+}
+
+async function backendFetchRoot<T>(
+  path: string,
+  options: { search?: Record<string, string> } = {},
+): Promise<T | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+
+  const url = new URL(`${base}/api/v1${path}`);
+  if (options.search) {
+    for (const [key, value] of Object.entries(options.search)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof err.detail === "string"
+          ? err.detail
+          : `Backend error ${response.status}`,
+      );
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    console.error(`[backend] ${path}:`, error);
+    return null;
+  }
+}
+
+export async function fetchBackendPolymarketMarkets(
+  filters: {
+    query?: string;
+    active?: boolean;
+    refresh?: boolean;
+    category?: string;
+    sort?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<PolymarketMarketsPayload | null> {
+  const params = new URLSearchParams();
+  if (filters.query) params.set("q", filters.query);
+  if (filters.active) params.set("active", "true");
+  if (filters.refresh) params.set("refresh", "true");
+  if (filters.category && filters.category !== "all") params.set("category", filters.category);
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+
+  const path = filters.query
+    ? `/polymarket/search?${params.toString()}`
+    : `/polymarket/markets?${params.toString()}`;
+
+  return backendFetchRoot<PolymarketMarketsPayload>(path);
+}
+
+export async function fetchBackendPolymarketMarket(
+  marketId: string,
+): Promise<{ market: Market } | null> {
+  return backendFetchRoot<{ market: Market }>(`/polymarket/markets/${encodeURIComponent(marketId)}`);
+}
+
+export async function fetchBackendPolymarketStatus(): Promise<PolymarketIntegrationStatus | null> {
+  return backendFetchRoot<PolymarketIntegrationStatus>("/polymarket/status");
 }
 
 export async function postBackendOrder(

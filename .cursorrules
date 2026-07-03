@@ -1,0 +1,33 @@
+# PropPredict — Cursor rules
+
+## Project overview
+
+PropPredict is a white-label prediction markets platform for prop firms. The stack is:
+
+- **Backend**: FastAPI (`backend/`), PostgreSQL, Redis, LMSR internal markets
+- **Frontend**: Next.js (`frontend/`), fortraders.com-inspired trader UI
+- **Multi-tenant**: firm-scoped branding via DB-backed tenant config
+
+## Polymarket integration
+
+Polymarket CLOB integration is a first-class part of this project.
+
+- **Package**: `backend/integrations/polymarket/`
+  - `PolymarketClient` — async wrapper around `py-clob-client-v2`
+  - `PolymarketService` — caching, normalization, search, health checks
+  - `rate_limiter.py` — outbound request throttling
+- **Config**: `PP_POLYMARKET_*` env vars in `backend/app/core/config.py` (see `.env.example`)
+- **API routes**: `backend/app/api/routes/polymarket.py` (`/api/polymarket/*`)
+- **Hybrid markets**: `backend/app/runtime/hybrid_markets.py` merges internal LMSR + Polymarket feeds
+- **Trading API**: `GET /api/v1/trading/markets?source=internal|polymarket|all`
+- **Frontend**: Polymarket cards, three-way source toggle (All / Internal / Polymarket), `/markets` explorer
+- **Docs**: `backend/integrations/polymarket/README.md`, Super Admin `/platform/integrations`
+
+When adding market features, preserve the unified market shape (`source: "internal" | "polymarket"`) and keep UI consistent with internal `MarketCard` styling.
+
+## Conventions
+
+- Match existing code style; keep diffs focused
+- Backend tests: `cd backend && pytest tests/ -q`
+- Frontend build: `cd frontend && npm run build`
+- Branch prefix for agent work: `cursor/<name>-224f`
