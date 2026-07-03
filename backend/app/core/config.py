@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # Demo market ticker broadcast interval (seconds).
     ticker_interval_seconds: float = 2.0
 
+    # Polymarket CLOB (py-clob-client-v2)
+    polymarket_host: str = "https://clob.polymarket.com"
+    polymarket_chain_id: int = 137
+    polymarket_private_key: str | None = None
+    polymarket_api_key: str | None = None
+    polymarket_api_secret: str | None = None
+    polymarket_api_passphrase: str | None = None
+    polymarket_request_timeout_seconds: float = 30.0
+    polymarket_use_server_time: bool = False
+    polymarket_retry_on_error: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
