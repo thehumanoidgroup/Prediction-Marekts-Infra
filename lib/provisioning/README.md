@@ -1,8 +1,9 @@
 # Prop firm account provisioning
 
-Automated provisioning models for sold prop firm evaluation accounts.
+Automated provisioning models and services for sold prop firm evaluation accounts.
 
-> **Stack note:** PropPredict runs as a single Next.js app. Database models are defined in **Prisma** (`prisma/schema.prisma`) with **Zod** validation schemas (`lib/schemas/provisioning.ts`) — the TypeScript equivalents of SQLAlchemy + Pydantic.
+> **Stack note:** PropPredict runs as a single Next.js app. The orchestration service lives at
+> **`services/account-provisioning.ts`** (equivalent to the requested `backend/services/account_provisioning.py`).
 
 ## Models
 
@@ -12,47 +13,51 @@ Automated provisioning models for sold prop firm evaluation accounts.
 | `ChallengeConfig` | 1:1 challenge rules per sold account |
 | `TraderDemoAccount` | Provisioned demo login + virtual balance (credentials encrypted at rest) |
 
-`PropFirmAccount.propFirmId` references `Tenant` (the white-label prop firm).
+## `provisionNewAccount(data)`
 
-## Example usage
+Full automation flow in one call:
+
+1. Resolves `ChallengeConfig` from `modelType` + `accountSize` + firm program + `customRules` JSON
+2. Creates `PropFirmAccount` + `ChallengeConfig` + `TraderDemoAccount`
+3. Generates secure login credentials (`password` or `magic_link` mode)
+4. Registers rules on the in-process **Risk Engine** (`lib/engine/risk.ts`)
 
 ```typescript
-import {
-  activatePropFirmAccount,
-  createPropFirmAccount,
-  provisionTraderDemoAccount,
-} from "@/lib/provisioning/accounts";
+import { provisionNewAccount } from "@/services/account-provisioning";
 
-// 1. Record a sale
-const sold = await createPropFirmAccount({
+const result = await provisionNewAccount({
   propFirmId: tenant.id,
   traderEmail: "trader@example.com",
   modelType: "2step",
   accountSize: "100K",
-  challengeConfig: {
-    profitTarget: 10,
-    dailyDrawdown: 5,
-    maxDrawdown: 10,
-    maxBetSizeValue: 2.5,
-    maxBetSizeMode: "percent",
-    otherCustomRules: { minTradingDays: 5 },
+  customRules: {
+    profitTarget: 9,
+    minTradingDays: 8,
+    maxExposurePerMarket: 8000,
   },
+  loginMode: "password", // or "magic_link"
+  activateImmediately: true,
 });
 
-// 2. Provision demo credentials
-await provisionTraderDemoAccount({
-  propFirmAccountId: sold.id,
-  virtualBalance: 100_000,
-  loginCredentials: {
-    username: "trader@example.com",
-    password: "generated-secure-password",
-    loginUrl: "https://app.proppredict.com",
-  },
-});
-
-// 3. Mark activated after credentials email sent
-await activatePropFirmAccount(sold.id);
+// Deliver once via email/webhook — do not log result.credentials.password
+await sendWelcomeEmail(result.credentials);
 ```
+
+### Helper methods
+
+| Function | Purpose |
+| --- | --- |
+| `resolveDefaultChallengeConfig()` | Baseline rules from model + size |
+| `mergeChallengeConfig()` | Apply explicit partial overrides |
+| `resolveChallengeConfigForAccount()` | Firm program + custom JSON + overrides |
+| `syncRiskProfileFromDatabase()` | Re-register risk rules after cold start |
+
+## API routes
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/platform/provisioning` | POST | Webhook / Super Admin provisioning |
+| `/api/platform/provisioning?propFirmId=` | GET | List registered risk profiles |
 
 ## Apply schema
 
@@ -63,4 +68,6 @@ npx prisma generate
 
 ## Environment
 
-Set `CREDENTIALS_ENCRYPTION_KEY` (or reuse `SECRET_KEY`) for AES-256-GCM encryption of `TraderDemoAccount.login_credentials`.
+- `SECRET_KEY` — JWT signing + magic links
+- `CREDENTIALS_ENCRYPTION_KEY` — AES-256-GCM for stored login credentials (optional; falls back to `SECRET_KEY`)
+- `APP_URL` — base URL for magic login links

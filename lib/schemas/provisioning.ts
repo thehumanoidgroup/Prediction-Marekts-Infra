@@ -19,25 +19,27 @@ export const traderLoginCredentialsSchema = z.object({
   loginUrl: z.string().url().optional(),
 });
 
-export const challengeConfigInputSchema = z
-  .object({
-    profitTarget: z.number().positive().max(100),
-    dailyDrawdown: z.number().positive().max(100),
-    maxDrawdown: z.number().positive().max(100),
-    maxBetSizeValue: z.number().positive(),
-    maxBetSizeMode: maxBetSizeModeSchema.default("percent"),
-    consistencyScore: z.number().min(0).max(100).nullable().optional(),
-    otherCustomRules: z.record(z.string(), z.unknown()).default({}),
-  })
-  .superRefine((data, ctx) => {
-    if (data.maxBetSizeMode === "percent" && data.maxBetSizeValue > 100) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "maxBetSizeValue cannot exceed 100 when mode is percent",
-        path: ["maxBetSizeValue"],
-      });
-    }
-  });
+const challengeConfigBaseSchema = z.object({
+  profitTarget: z.number().positive().max(100),
+  dailyDrawdown: z.number().positive().max(100),
+  maxDrawdown: z.number().positive().max(100),
+  maxBetSizeValue: z.number().positive(),
+  maxBetSizeMode: maxBetSizeModeSchema.default("percent"),
+  consistencyScore: z.number().min(0).max(100).nullable().optional(),
+  otherCustomRules: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const challengeConfigInputSchema = challengeConfigBaseSchema.superRefine((data, ctx) => {
+  if (data.maxBetSizeMode === "percent" && data.maxBetSizeValue > 100) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "maxBetSizeValue cannot exceed 100 when mode is percent",
+      path: ["maxBetSizeValue"],
+    });
+  }
+});
+
+export const challengeConfigOverridesSchema = challengeConfigBaseSchema.partial();
 
 export const propFirmAccountCreateSchema = z.object({
   propFirmId: z.string().uuid(),
@@ -46,6 +48,19 @@ export const propFirmAccountCreateSchema = z.object({
   accountSize: accountSizeSchema,
   purchasedAt: z.coerce.date().optional(),
   challengeConfig: challengeConfigInputSchema,
+});
+
+/** Input for the full automated provisioning flow (rules resolved server-side). */
+export const provisionNewAccountSchema = z.object({
+  propFirmId: z.string().uuid(),
+  traderEmail: z.string().email().max(320),
+  modelType: modelTypeSchema,
+  accountSize: accountSizeSchema,
+  purchasedAt: z.coerce.date().optional(),
+  customRules: z.record(z.string(), z.unknown()).optional(),
+  challengeConfigOverrides: challengeConfigOverridesSchema.optional(),
+  loginMode: z.enum(["password", "magic_link"]).default("password"),
+  activateImmediately: z.boolean().default(false),
 });
 
 export const propFirmAccountStatusUpdateSchema = z.object({
@@ -98,5 +113,6 @@ export const propFirmAccountRecordSchema = z.object({
 });
 
 export type PropFirmAccountCreateInput = z.infer<typeof propFirmAccountCreateSchema>;
+export type ProvisionNewAccountInput = z.infer<typeof provisionNewAccountSchema>;
 export type PropFirmAccountStatusUpdateInput = z.infer<typeof propFirmAccountStatusUpdateSchema>;
 export type ProvisionTraderDemoAccountInput = z.infer<typeof provisionTraderDemoAccountSchema>;

@@ -77,8 +77,9 @@ export interface TraderDemoAccountRecord {
   updatedAt: string;
 }
 
-export interface ProvisionTraderDemoAccountInput {
-  propFirmAccountId: string;
-  virtualBalance: number;
-  loginCredentials: TraderLoginCredentials;
+export interface ProvisionNewAccountResult {
+  account: PropFirmAccountRecord;
+  riskProfile: import("@/lib/engine/risk").RiskProfile;
+  credentials: TraderLoginCredentials & { magicLink?: string };
+  credentialsFingerprint: string;
 }
