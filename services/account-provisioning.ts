@@ -47,6 +47,7 @@ import {
 } from "@/lib/provisioning/serialize";
 import { tenantRowToConfig } from "@/lib/tenant-db";
 import { provisionNewAccountSchema } from "@/lib/schemas/provisioning";
+import { sendProvisioningEmails, type ProvisioningEmailResult } from "@/services/email";
 import type {
   AccountSize,
   ChallengeConfigInput,
@@ -74,6 +75,8 @@ export interface ProvisionNewAccountInput {
   loginMode?: LoginDeliveryMode;
   /** Mark account activated and set credentialsSentAt after provisioning. */
   activateImmediately?: boolean;
+  /** Send trader + prop firm emails after provisioning. Default: true. */
+  sendEmails?: boolean;
 }
 
 export interface ProvisionNewAccountResult {
@@ -82,6 +85,7 @@ export interface ProvisionNewAccountResult {
   /** One-time credential payload for email/webhook delivery. Do not persist or log. */
   credentials: TraderLoginCredentials & { magicLink?: string };
   credentialsFingerprint: string;
+  emails?: ProvisioningEmailResult;
 }
 
 /**
@@ -128,6 +132,7 @@ export async function provisionNewAccount(
     challengeConfigOverrides: input.challengeConfigOverrides,
     loginMode: input.loginMode,
     activateImmediately: input.activateImmediately,
+    sendEmails: input.sendEmails,
   });
 
   const firm = await prisma.tenant.findUnique({ where: { id: data.propFirmId } });
@@ -220,6 +225,34 @@ export async function provisionNewAccount(
     }),
   );
 
+  let emails: ProvisioningEmailResult | undefined;
+  const shouldSendEmails = data.sendEmails !== false;
+
+  if (shouldSendEmails) {
+    emails = await sendProvisioningEmails({
+      account: accountRecord,
+      credentials: row.generated.delivery,
+      firmName: firmConfig.name,
+      propFirmId: data.propFirmId,
+      virtualBalance,
+      challengeConfig,
+    });
+
+    if (emails.trader.sent) {
+      await prisma.propFirmAccount.update({
+        where: { id: row.row.id },
+        data: {
+          credentialsSentAt: new Date(),
+          status: accountRecord.status === "provisioned" ? "activated" : undefined,
+        },
+      });
+      accountRecord.credentialsSentAt = new Date().toISOString();
+      if (accountRecord.status === "provisioned") {
+        accountRecord.status = "activated";
+      }
+    }
+  }
+
   return {
     account: accountRecord,
     riskProfile,
@@ -227,6 +260,7 @@ export async function provisionNewAccount(
     credentialsFingerprint: credentialsFingerprint(
       row.generated.delivery.password ?? row.row.id,
     ),
+    emails,
   };
 }
 

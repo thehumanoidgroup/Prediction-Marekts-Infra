@@ -50,8 +50,9 @@ export async function POST(request: NextRequest) {
       {
         account: result.account,
         credentialsFingerprint: result.credentialsFingerprint,
-        // Prop firm forwards credentials to the trader via their own email system.
-        credentials: result.credentials,
+        emails: result.emails,
+        // Credentials are emailed to the trader automatically when Resend is configured.
+        ...(result.emails?.trader.sent ? {} : { credentials: result.credentials }),
       },
       { status: 201 },
     );

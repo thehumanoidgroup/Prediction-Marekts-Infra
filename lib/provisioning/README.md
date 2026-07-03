@@ -40,7 +40,7 @@ const result = await provisionNewAccount({
 });
 
 // Deliver once via email/webhook — do not log result.credentials.password
-await sendWelcomeEmail(result.credentials);
+// Emails are sent automatically when provisioning completes (see services/email.ts).
 ```
 
 ### Helper methods
@@ -51,6 +51,24 @@ await sendWelcomeEmail(result.credentials);
 | `mergeChallengeConfig()` | Apply explicit partial overrides |
 | `resolveChallengeConfigForAccount()` | Firm program + custom JSON + overrides |
 | `syncRiskProfileFromDatabase()` | Re-register risk rules after cold start |
+
+## Provisioning emails
+
+Automated emails are sent after successful provisioning via **`services/email.ts`**
+(equivalent to the requested `backend/services/email_service.py`).
+
+| Function | Recipient | Content |
+| --- | --- | --- |
+| `sendTraderCredentials()` | Trader | Login link or credentials, account size, model type, challenge rules, support contact |
+| `sendPropFirmNotification()` | Prop firm admin | Account details summary, trader email, challenge rules |
+| `sendProvisioningEmails()` | Both | Called automatically from `provisionNewAccount()` |
+
+Templates live in `lib/email/templates.ts`. Delivery uses [Resend](https://resend.com) when
+`RESEND_API_KEY` is set; otherwise emails are logged to the console in development.
+
+Set `sendEmails: false` on `provisionNewAccount()` or `send_emails: false` on webhook/manual
+payloads to skip delivery. API responses omit raw `credentials` when the trader email was sent
+successfully.
 
 ## API routes
 
@@ -90,3 +108,7 @@ npx prisma generate
 - `SECRET_KEY` — JWT signing + magic links
 - `CREDENTIALS_ENCRYPTION_KEY` — AES-256-GCM for stored login credentials (optional; falls back to `SECRET_KEY`)
 - `APP_URL` — base URL for magic login links
+- `RESEND_API_KEY` — Resend API key for production email delivery
+- `EMAIL_FROM` — sender address (default: `PropPredict <onboarding@resend.dev>`)
+- `SUPPORT_EMAIL` — support contact shown in provisioning emails
+- `PROVISIONING_EMAILS_ENABLED` — set to `false` to disable all provisioning emails

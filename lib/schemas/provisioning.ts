@@ -61,6 +61,7 @@ export const provisionNewAccountSchema = z.object({
   challengeConfigOverrides: challengeConfigOverridesSchema.optional(),
   loginMode: z.enum(["password", "magic_link"]).default("password"),
   activateImmediately: z.boolean().default(false),
+  sendEmails: z.boolean().default(true),
 });
 
 /** Webhook payload (snake_case) from prop firm checkout systems. */
@@ -102,6 +103,8 @@ export const provisioningManualSchema = z
     login_mode: z.enum(["password", "magic_link"]).optional(),
     activateImmediately: z.boolean().optional(),
     activate_immediately: z.boolean().optional(),
+    sendEmails: z.boolean().optional(),
+    send_emails: z.boolean().optional(),
     purchasedAt: z.coerce.date().optional(),
     purchased_at: z.coerce.date().optional(),
   })
@@ -115,6 +118,7 @@ export const provisioningManualSchema = z
     loginMode: data.loginMode ?? data.login_mode ?? "password",
     activateImmediately: data.activateImmediately ?? data.activate_immediately ?? true,
     purchasedAt: data.purchasedAt ?? data.purchased_at,
+    sendEmails: data.sendEmails ?? data.send_emails,
   }))
   .superRefine((data, ctx) => {
     const required: Array<keyof typeof data> = [
