@@ -87,6 +87,71 @@ export async function listPropFirmAccountsByFirm(
   return rows.map(serializePropFirmAccount);
 }
 
+export interface ListPropFirmAccountsFilters {
+  propFirmId?: string;
+  status?: PropFirmAccountRecord["status"];
+  traderEmail?: string;
+  modelType?: PropFirmAccountRecord["modelType"];
+  accountSize?: PropFirmAccountRecord["accountSize"];
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListPropFirmAccountsResult {
+  accounts: PropFirmAccountRecord[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+}
+
+/** List sold accounts with optional filters (Super Admin). */
+export async function listPropFirmAccounts(
+  filters: ListPropFirmAccountsFilters = {},
+): Promise<ListPropFirmAccountsResult> {
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 20;
+
+  const where = {
+    ...(filters.propFirmId ? { propFirmId: filters.propFirmId } : {}),
+    ...(filters.status ? { status: fromApiStatus(filters.status) } : {}),
+    ...(filters.modelType ? { modelType: fromApiModelType(filters.modelType) } : {}),
+    ...(filters.accountSize ? { accountSize: fromApiAccountSize(filters.accountSize) } : {}),
+    ...(filters.traderEmail
+      ? { traderEmail: { contains: filters.traderEmail.toLowerCase(), mode: "insensitive" as const } }
+      : {}),
+  };
+
+  const [total, rows] = await Promise.all([
+    prisma.propFirmAccount.count({ where }),
+    prisma.propFirmAccount.findMany({
+      where,
+      include: accountInclude,
+      orderBy: { purchasedAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+
+  return {
+    accounts: rows.map(serializePropFirmAccount),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1 && totalPages > 0,
+    },
+  };
+}
+
 export async function updatePropFirmAccountStatus(
   id: string,
   input: { status: PropFirmAccountRecord["status"]; credentialsSentAt?: Date | null },

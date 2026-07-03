@@ -30,7 +30,7 @@ All backend logic runs as Next.js Route Handlers under `app/api/`:
 - `/api/markets`, `/api/orders`, `/api/portfolio`, `/api/journal`
 - `/api/polymarket/*` — Polymarket CLOB market discovery
 - `/api/tenant`, `/api/admin/tenant` — white-label config
-- `/api/platform/*` — Super Admin endpoints (including `/api/platform/provisioning`)
+- `/api/provisioning/*` — account provisioning (webhook, manual, list)
 
 ## Conventions
 

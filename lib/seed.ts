@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import { createPropFirmApiKey } from "@/lib/provisioning/api-keys";
 
 const DEMO_PASSWORD = "demo-password-123";
 
@@ -89,14 +90,33 @@ const SEED_TENANTS = [
 
 let seeded = false;
 
+async function ensureWebhookApiKeys(): Promise<void> {
+  const tenants = await prisma.tenant.findMany({ select: { id: true, slug: true } });
+  for (const tenant of tenants) {
+    const count = await prisma.propFirmApiKey.count({ where: { tenantId: tenant.id } });
+    if (count > 0) continue;
+
+    const key = await createPropFirmApiKey(tenant.id, "webhook");
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[seed] Webhook API key for ${tenant.slug}: ${key.rawKey}`);
+    }
+  }
+}
+
 export async function ensureSeeded(): Promise<void> {
-  if (seeded) return;
+  if (seeded) {
+    if (process.env.DATABASE_URL) {
+      await ensureWebhookApiKeys();
+    }
+    return;
+  }
   if (!process.env.DATABASE_URL) return;
 
   try {
     const count = await prisma.tenant.count();
     if (count > 0) {
       seeded = true;
+      await ensureWebhookApiKeys();
       return;
     }
 
@@ -146,6 +166,7 @@ export async function ensureSeeded(): Promise<void> {
     });
 
     seeded = true;
+    await ensureWebhookApiKeys();
   } catch (error) {
     console.error("[seed] failed:", error);
   }

@@ -60,8 +60,26 @@ model Tenant {
   updatedAt        DateTime          @updatedAt @map("updated_at")
   users            User[]
   propFirmAccounts PropFirmAccount[]
+  apiKeys          PropFirmApiKey[]
 
   @@map("tenants")
+}
+
+/// Webhook API key for automated account provisioning (one firm, many keys).
+model PropFirmApiKey {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  label      String    @default("default")
+  keyPrefix  String    @unique @map("key_prefix")
+  keyHash    String    @map("key_hash")
+  isActive   Boolean   @default(true) @map("is_active")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("prop_firm_api_keys")
 }
 
 model User {

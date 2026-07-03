@@ -63,6 +63,91 @@ export const provisionNewAccountSchema = z.object({
   activateImmediately: z.boolean().default(false),
 });
 
+/** Webhook payload (snake_case) from prop firm checkout systems. */
+export const provisioningWebhookSchema = z
+  .object({
+    prop_firm_id: z.string().uuid(),
+    trader_email: z.string().email().max(320),
+    model_type: modelTypeSchema,
+    account_size: accountSizeSchema,
+    custom_rules: z.record(z.string(), z.unknown()).optional(),
+    purchased_at: z.coerce.date().optional(),
+  })
+  .transform((data) => ({
+    propFirmId: data.prop_firm_id,
+    traderEmail: data.trader_email,
+    modelType: data.model_type,
+    accountSize: data.account_size,
+    customRules: data.custom_rules,
+    purchasedAt: data.purchased_at,
+    activateImmediately: true,
+  }));
+
+/** Super Admin manual provisioning (camelCase or snake_case). */
+export const provisioningManualSchema = z
+  .object({
+    propFirmId: z.string().uuid().optional(),
+    prop_firm_id: z.string().uuid().optional(),
+    traderEmail: z.string().email().max(320).optional(),
+    trader_email: z.string().email().max(320).optional(),
+    modelType: modelTypeSchema.optional(),
+    model_type: modelTypeSchema.optional(),
+    accountSize: accountSizeSchema.optional(),
+    account_size: accountSizeSchema.optional(),
+    customRules: z.record(z.string(), z.unknown()).optional(),
+    custom_rules: z.record(z.string(), z.unknown()).optional(),
+    challengeConfigOverrides: challengeConfigOverridesSchema.optional(),
+    challenge_config_overrides: challengeConfigOverridesSchema.optional(),
+    loginMode: z.enum(["password", "magic_link"]).optional(),
+    login_mode: z.enum(["password", "magic_link"]).optional(),
+    activateImmediately: z.boolean().optional(),
+    activate_immediately: z.boolean().optional(),
+    purchasedAt: z.coerce.date().optional(),
+    purchased_at: z.coerce.date().optional(),
+  })
+  .transform((data) => ({
+    propFirmId: data.propFirmId ?? data.prop_firm_id!,
+    traderEmail: data.traderEmail ?? data.trader_email!,
+    modelType: data.modelType ?? data.model_type!,
+    accountSize: data.accountSize ?? data.account_size!,
+    customRules: data.customRules ?? data.custom_rules,
+    challengeConfigOverrides: data.challengeConfigOverrides ?? data.challenge_config_overrides,
+    loginMode: data.loginMode ?? data.login_mode ?? "password",
+    activateImmediately: data.activateImmediately ?? data.activate_immediately ?? true,
+    purchasedAt: data.purchasedAt ?? data.purchased_at,
+  }))
+  .superRefine((data, ctx) => {
+    const required: Array<keyof typeof data> = [
+      "propFirmId",
+      "traderEmail",
+      "modelType",
+      "accountSize",
+    ];
+    for (const field of required) {
+      if (data[field] === undefined || data[field] === null || data[field] === "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${String(field)} is required`,
+          path: [field],
+        });
+      }
+    }
+  });
+
+export const listProvisioningAccountsQuerySchema = z.object({
+  prop_firm_id: z.string().uuid().optional(),
+  propFirmId: z.string().uuid().optional(),
+  status: accountStatusSchema.optional(),
+  trader_email: z.string().optional(),
+  traderEmail: z.string().optional(),
+  model_type: modelTypeSchema.optional(),
+  modelType: modelTypeSchema.optional(),
+  account_size: accountSizeSchema.optional(),
+  accountSize: accountSizeSchema.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 export const propFirmAccountStatusUpdateSchema = z.object({
   status: accountStatusSchema,
   credentialsSentAt: z.coerce.date().nullable().optional(),

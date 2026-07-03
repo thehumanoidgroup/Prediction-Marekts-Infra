@@ -54,10 +54,29 @@ await sendWelcomeEmail(result.credentials);
 
 ## API routes
 
-| Route | Method | Purpose |
-| --- | --- | --- |
-| `/api/platform/provisioning` | POST | Webhook / Super Admin provisioning |
-| `/api/platform/provisioning?propFirmId=` | GET | List registered risk profiles |
+| Route | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/api/provisioning/webhook` | POST | `X-API-Key` (per firm) | Prop firm checkout webhook |
+| `/api/provisioning/manual` | POST | Super Admin JWT | Manual account creation |
+| `/api/provisioning/accounts` | GET | Super Admin JWT | List sold accounts (filterable) |
+| `/api/provisioning/accounts/{id}` | GET | Super Admin JWT | Single account detail |
+
+### Webhook example
+
+```bash
+curl -X POST https://your-app.vercel.app/api/provisioning/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ppk_..." \
+  -d '{
+    "prop_firm_id": "uuid",
+    "trader_email": "buyer@example.com",
+    "model_type": "2step",
+    "account_size": "100K",
+    "custom_rules": { "profitTarget": 9 }
+  }'
+```
+
+Webhook API keys are created per tenant on first `ensureSeeded()` run (logged in development).
 
 ## Apply schema
 
