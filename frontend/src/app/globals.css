@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Tenant branding overrides the --tenant-* variables at
+ * runtime (injected inline on <body> by the root layout), which cascades
+ * through every accent-colored element in the app.
+ */
+:root {
+  --tenant-accent: #22c55e;
+  --tenant-accent-hover: #16a34a;
+  --tenant-accent-soft: rgba(34, 197, 94, 0.12);
+  --tenant-accent-foreground: #04170b;
+}
+
+@theme {
+  --color-background: #0a0d12;
+  --color-surface: #10141c;
+  --color-surface-2: #151b25;
+  --color-surface-3: #1b2230;
+  --color-edge: #1d2430;
+  --color-edge-strong: #2a3342;
+  --color-foreground: #e8ecf3;
+  --color-muted: #8b95a7;
+  --color-faint: #5c6577;
+
+  --color-accent: var(--tenant-accent);
+  --color-accent-hover: var(--tenant-accent-hover);
+  --color-accent-soft: var(--tenant-accent-soft);
+  --color-accent-foreground: var(--tenant-accent-foreground);
+
+  --color-up: #22c55e;
+  --color-up-soft: rgba(34, 197, 94, 0.12);
+  --color-down: #f43f5e;
+  --color-down-soft: rgba(244, 63, 94, 0.12);
+  --color-warn: #f59e0b;
+  --color-warn-soft: rgba(245, 158, 11, 0.12);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    Menlo, monospace;
+
+  --radius-card: 0.875rem;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numeric alignment in tables and stats. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin scrollbars that match the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Subtle live-pulse for real-time indicators. */
+@keyframes pp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-live {
+  animation: pp-pulse 2s ease-in-out infinite;
+}
+
+/* One-shot tick flashes for live price updates. */
+@keyframes pp-flash-up {
+  0% {
+    color: var(--color-up);
+  }
+  100% {
+    color: inherit;
+  }
+}
+@keyframes pp-flash-down {
+  0% {
+    color: var(--color-down);
+  }
+  100% {
+    color: inherit;
+  }
+}
+.animate-flash-up {
+  animation: pp-flash-up 1s ease-out;
+}
+.animate-flash-down {
+  animation: pp-flash-down 1s ease-out;
+}
+
+/* Skeleton shimmer for loading placeholders. */
+@keyframes pp-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-3) 0%,
+    var(--color-edge-strong) 50%,
+    var(--color-surface-3) 100%
+  );
+  background-size: 200% 100%;
+  animation: pp-shimmer 1.6s ease-in-out infinite;
+}
+
+/* Subtle glow pulse on live price containers. */
+@keyframes pp-live-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 12px -2px color-mix(in srgb, var(--tenant-accent) 35%, transparent);
+  }
+}
+.animate-live-glow {
+  animation: pp-live-glow 2.5s ease-in-out infinite;
+}
+
+/* Spinner for pending actions. */
+@keyframes pp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: pp-spin 0.7s linear infinite;
+}
