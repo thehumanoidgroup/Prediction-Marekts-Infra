@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { notifyPortfolioRefresh } from "@/lib/hooks/use-dashboard-data";
 import type { Outcome } from "@/lib/types";
 import { useLivePrice } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
@@ -89,6 +90,7 @@ export function BetModal({
       setPlaced(
         `Bought ${shares} ${outcome.toUpperCase()} @ ${formatCents(body.order.price)}`,
       );
+      notifyPortfolioRefresh();
       router.refresh();
     } catch {
       setError("Network error — try again");

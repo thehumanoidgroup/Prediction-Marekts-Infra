@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { notifyPortfolioRefresh } from "@/lib/hooks/use-dashboard-data";
 import { cn } from "@/lib/utils";
 
 /** Quick journal note input — posts to /api/journal and refreshes. */
@@ -28,6 +29,7 @@ export function NoteComposer() {
         return;
       }
       setNote("");
+      notifyPortfolioRefresh();
       router.refresh();
     } catch {
       setError("Network error — try again");

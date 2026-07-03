@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { postBackendOrder } from "@/lib/api-server";
 import { placeOrder } from "@/lib/services";
 import { getTenantFromRequest } from "@/lib/tenant-request";
 
@@ -24,6 +25,14 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  const remote = await postBackendOrder(tenant.slug, {
+    marketId,
+    outcome,
+    side,
+    shares,
+  });
+  if (remote) return NextResponse.json(remote, { status: 201 });
 
   try {
     const result = placeOrder(tenant.id, { marketId, outcome, side, shares });

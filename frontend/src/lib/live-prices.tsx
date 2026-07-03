@@ -100,6 +100,9 @@ export function LivePricesProvider({
               : current,
           );
         }
+        if (message.type === "portfolio_update") {
+          window.dispatchEvent(new CustomEvent("pp:portfolio-refresh"));
+        }
       } catch {
         // Ignore malformed frames.
       }

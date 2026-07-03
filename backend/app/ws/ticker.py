@@ -11,16 +11,18 @@ from app.db.session import SessionLocal
 from app.models import Tenant
 from app.ws.manager import manager
 
+from app.runtime.store import get_trading_store
+
 logger = logging.getLogger(__name__)
 
 # Demo instruments; replaced by the real matching engine's trade feed.
 # Ids match the frontend's seeded markets so connected clients see cards
 # tick in real time.
 DEMO_MARKETS: dict[str, float] = {
-    "mkt-1": 0.42,   # BTC above $150K
-    "mkt-4": 0.56,   # NVDA $6T market cap
-    "mkt-11": 0.68,  # Fed September cut
-    "mkt-14": 0.58,  # S&P 500 above 7,000
+    "mkt-1": 0.42,
+    "mkt-4": 0.56,
+    "mkt-11": 0.68,
+    "mkt-14": 0.58,
 }
 
 
@@ -38,11 +40,14 @@ async def run_market_ticker() -> None:
         market_id = random.choice(list(prices))
         drift = random.uniform(-0.02, 0.02)
         prices[market_id] = min(0.97, max(0.03, prices[market_id] + drift))
+        yes_price = round(prices[market_id], 3)
+
+        get_trading_store().apply_price_tick(market_id, yes_price)
 
         tick = {
             "type": "price_tick",
             "market_id": market_id,
-            "yes_price": round(prices[market_id], 3),
+            "yes_price": yes_price,
             "ts": int(time.time() * 1000),
         }
 

@@ -1,0 +1,122 @@
+import { getBackendUrl } from "@/lib/backend";
+import type {
+  ChallengeAccount,
+  JournalEntry,
+  Market,
+  Order,
+  Outcome,
+  PortfolioSummary,
+  Position,
+} from "@/lib/types";
+import type { EnrichedPosition } from "@/lib/services";
+
+export interface PortfolioPayload {
+  account: ChallengeAccount;
+  positions: EnrichedPosition[];
+  summary: PortfolioSummary;
+}
+
+export interface MarketsPayload {
+  markets: Market[];
+}
+
+export interface JournalPayload {
+  journal: JournalEntry[];
+}
+
+export interface OrderResult {
+  order: Order;
+  position: Position | null;
+}
+
+interface BackendOptions {
+  tenantSlug: string;
+  method?: string;
+  body?: unknown;
+  search?: Record<string, string>;
+}
+
+async function backendFetch<T>(path: string, options: BackendOptions): Promise<T | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+
+  const url = new URL(`${base}/api/v1/trading${path}`);
+  if (options.search) {
+    for (const [key, value] of Object.entries(options.search)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: options.method ?? "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Slug": options.tenantSlug,
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof err.detail === "string"
+          ? err.detail
+          : typeof err.error === "string"
+            ? err.error
+            : `Backend error ${response.status}`,
+      );
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    console.error(`[backend] ${path}:`, error);
+    return null;
+  }
+}
+
+export async function fetchBackendPortfolio(tenantSlug: string): Promise<PortfolioPayload | null> {
+  return backendFetch<PortfolioPayload>("/portfolio", { tenantSlug });
+}
+
+export async function fetchBackendMarkets(
+  tenantSlug: string,
+  filters: { category?: string; query?: string; sort?: string } = {},
+): Promise<MarketsPayload | null> {
+  return backendFetch<MarketsPayload>("/markets", {
+    tenantSlug,
+    search: {
+      category: filters.category ?? "all",
+      q: filters.query ?? "",
+      sort: filters.sort ?? "volume",
+    },
+  });
+}
+
+export async function fetchBackendJournal(tenantSlug: string): Promise<JournalPayload | null> {
+  return backendFetch<JournalPayload>("/journal", { tenantSlug });
+}
+
+export async function postBackendOrder(
+  tenantSlug: string,
+  input: { marketId: string; outcome: Outcome; side: "buy" | "sell"; shares: number },
+): Promise<OrderResult | null> {
+  return backendFetch<OrderResult>("/orders", {
+    tenantSlug,
+    method: "POST",
+    body: input,
+  });
+}
+
+export async function postBackendJournalNote(
+  tenantSlug: string,
+  note: string,
+  tags: string[] = [],
+): Promise<{ entry: JournalEntry } | null> {
+  return backendFetch<{ entry: JournalEntry }>("/journal", {
+    tenantSlug,
+    method: "POST",
+    body: { note, tags },
+  });
+}
