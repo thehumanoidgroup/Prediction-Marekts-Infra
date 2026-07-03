@@ -41,7 +41,12 @@ export function MarketCard({ market }: { market: Market }) {
     >
       <Link href={`/markets/${market.id}`} className="flex flex-1 flex-col p-4 pb-3 sm:p-5 sm:pb-3">
         <div className="flex items-start justify-between gap-2">
-          <Badge>{categoryLabels[market.category]}</Badge>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge>{categoryLabels[market.category]}</Badge>
+            {market.source === "internal" ? (
+              <Badge className="bg-accent-soft text-accent">LMSR</Badge>
+            ) : null}
+          </div>
           <div className="flex items-center gap-1.5">
             {market.status === "closing_soon" ? <Badge tone="warn">Closing soon</Badge> : null}
             <span

@@ -19,6 +19,8 @@ export interface PortfolioPayload {
 
 export interface MarketsPayload {
   markets: Market[];
+  source?: import("@/lib/types").MarketViewSource;
+  counts?: { internal: number; polymarket: number };
 }
 
 export interface PaginationMeta {
@@ -97,7 +99,12 @@ export async function fetchBackendPortfolio(tenantSlug: string): Promise<Portfol
 
 export async function fetchBackendMarkets(
   tenantSlug: string,
-  filters: { category?: string; query?: string; sort?: string } = {},
+  filters: {
+    category?: string;
+    query?: string;
+    sort?: string;
+    source?: import("@/lib/types").MarketViewSource;
+  } = {},
 ): Promise<MarketsPayload | null> {
   return backendFetch<MarketsPayload>("/markets", {
     tenantSlug,
@@ -105,6 +112,7 @@ export async function fetchBackendMarkets(
       category: filters.category ?? "all",
       q: filters.query ?? "",
       sort: filters.sort ?? "volume",
+      source: filters.source ?? "all",
     },
   });
 }

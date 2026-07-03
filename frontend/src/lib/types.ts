@@ -10,6 +10,12 @@ export type MarketCategory =
 
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
+/** Where a market's liquidity and pricing originate. */
+export type MarketSourceType = "internal" | "polymarket";
+
+/** Trader UI filter for which market feeds to display. */
+export type MarketViewSource = MarketSourceType | "all";
+
 export type Outcome = "yes" | "no";
 
 export interface PricePoint {
@@ -39,8 +45,8 @@ export interface Market {
   closesAt: number;
   resolvedOutcome?: Outcome;
   history: PricePoint[];
-  /** Present when market is sourced from Polymarket CLOB. */
-  source?: "polymarket" | "internal";
+  /** Liquidity source — internal LMSR simulator or external Polymarket CLOB. */
+  source: MarketSourceType;
   externalConditionId?: string;
   marketSlug?: string | null;
   acceptingOrders?: boolean;
@@ -58,6 +64,12 @@ export type PolymarketMarket = Market & {
   source: "polymarket";
   externalConditionId: string;
 };
+
+export interface HybridMarketsPayload {
+  markets: Market[];
+  source: MarketViewSource;
+  counts: { internal: number; polymarket: number };
+}
 
 export interface PolymarketIntegrationStatus {
   provider: "polymarket";

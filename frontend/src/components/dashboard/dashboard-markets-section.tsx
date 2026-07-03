@@ -5,41 +5,62 @@ import { Suspense, useState } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   MarketSourceToggle,
-  type MarketSource,
 } from "@/components/markets/market-source-toggle";
-import { PolymarketMarketCard } from "@/components/markets/polymarket-market-card";
-import { MarketCard } from "@/components/markets/market-card";
-import type { Market, PolymarketMarket } from "@/lib/types";
-import { usePolymarketMarkets } from "@/lib/hooks/use-polymarket-markets";
+import { MarketListingCard } from "@/components/markets/market-listing-card";
+import { useHybridMarkets } from "@/lib/hooks/use-hybrid-markets";
+import type { MarketViewSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function DashboardMarketsSectionBody({
-  internalMarkets,
-}: {
-  internalMarkets: Market[];
-}) {
-  const [source, setSource] = useState<MarketSource>("internal");
-  const polymarket = usePolymarketMarkets({}, { enabled: source === "polymarket", limit: 6 });
+function sectionTitle(source: MarketViewSource): string {
+  switch (source) {
+    case "internal":
+      return "Internal Markets";
+    case "polymarket":
+      return "Polymarket Markets";
+    default:
+      return "Hybrid Markets";
+  }
+}
 
-  const markets =
+function sectionSubtitle(source: MarketViewSource): string {
+  switch (source) {
+    case "internal":
+      return "PropPredict LMSR simulation markets";
+    case "polymarket":
+      return "Live odds from Polymarket CLOB";
+    default:
+      return "Internal LMSR + live Polymarket listings";
+  }
+}
+
+function DashboardMarketsSectionBody() {
+  const [source, setSource] = useState<MarketViewSource>("all");
+  const { payload, refreshing } = useHybridMarkets({ source }, { limit: 6 });
+
+  const markets = payload.status === "success" ? payload.data.markets : [];
+  const counts = payload.status === "success" ? payload.data.counts : null;
+  const isLoading = payload.status === "loading";
+  const isError = payload.status === "error";
+
+  const viewAllHref =
     source === "polymarket"
-      ? polymarket.markets.status === "success"
-        ? polymarket.markets.data
-        : []
-      : internalMarkets.slice(0, 6);
+      ? "/markets?source=polymarket"
+      : source === "internal"
+        ? "/markets?source=internal"
+        : "/markets";
 
   return (
     <Card>
       <CardHeader
-        title={source === "polymarket" ? "Polymarket Markets" : "Internal Markets"}
+        title={sectionTitle(source)}
         subtitle={
-          source === "polymarket"
-            ? "Live odds from Polymarket CLOB"
-            : "PropPredict LMSR simulation markets"
+          counts && source === "all"
+            ? `${sectionSubtitle(source)} · ${counts.internal} LMSR · ${counts.polymarket} Polymarket`
+            : sectionSubtitle(source)
         }
         action={
           <Link
-            href={source === "polymarket" ? "/markets?source=polymarket" : "/markets"}
+            href={viewAllHref}
             className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
           >
             View all
@@ -53,7 +74,7 @@ function DashboardMarketsSectionBody({
           onChange={setSource}
         />
 
-        {source === "polymarket" && polymarket.markets.status === "loading" ? (
+        {isLoading ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 3 }).map((_, index) => (
               <div
@@ -64,30 +85,34 @@ function DashboardMarketsSectionBody({
           </div>
         ) : null}
 
-        {source === "polymarket" && polymarket.markets.status === "error" ? (
-          <p className="py-6 text-center text-sm text-down">{polymarket.markets.error}</p>
+        {isError ? (
+          <p className="py-6 text-center text-sm text-down">{payload.error}</p>
         ) : null}
 
-        {markets.length > 0 ? (
+        {!isLoading && markets.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {source === "polymarket"
-              ? markets.map((market) => (
-                  <PolymarketMarketCard key={market.id} market={market as PolymarketMarket} />
-                ))
-              : markets.map((market) => <MarketCard key={market.id} market={market} />)}
+            {markets.map((market) => (
+              <MarketListingCard key={market.id} market={market} />
+            ))}
           </div>
-        ) : source !== "polymarket" || polymarket.markets.status === "success" ? (
+        ) : null}
+
+        {!isLoading && !isError && markets.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted">No markets to show.</p>
+        ) : null}
+
+        {refreshing ? (
+          <p className="text-center text-[11px] text-faint">Refreshing market feed…</p>
         ) : null}
       </CardBody>
     </Card>
   );
 }
 
-export function DashboardMarketsSection({ internalMarkets }: { internalMarkets: Market[] }) {
+export function DashboardMarketsSection() {
   return (
     <Suspense fallback={<div className="h-64 animate-pulse rounded-card border border-edge bg-surface" />}>
-      <DashboardMarketsSectionBody internalMarkets={internalMarkets} />
+      <DashboardMarketsSectionBody />
     </Suspense>
   );
 }

@@ -209,6 +209,8 @@ curl "http://localhost:8000/api/polymarket/markets/poly-0x..."
 
 ### Trader UI
 
-- `/markets` — toggle **Internal Markets** / **Polymarket Markets**
-- `/dashboard` — preview section with the same toggle
+- `/markets` — toggle **All Markets** / **Internal** / **Polymarket** (hybrid view is the default)
+- `/dashboard` — hybrid preview section with the same three-way toggle
 - `/platform/integrations` — Super Admin connection status (SuperAdmin)
+
+Hybrid listings use `GET /api/v1/trading/markets?source=all` (default) and return per-source counts.

@@ -137,6 +137,7 @@ function generateMarkets(now: number): Market[] {
       traders: Math.round(120 + rng() * 2400),
       closesAt,
       history,
+      source: "internal" as const,
     };
   });
 }
@@ -392,6 +393,7 @@ function generateGlobalTemplates(now: number): Market[] {
       traders: 0,
       closesAt: now + 60 * DAY,
       history,
+      source: "internal" as const,
     };
   });
 }
@@ -648,6 +650,7 @@ export function createMarketFromTemplate(input: CreateMarketInput): Market {
     traders: 0,
     closesAt: input.closesAt,
     history,
+    source: "internal",
   };
   store.markets.unshift(market);
   return market;
@@ -692,6 +695,7 @@ export function createGlobalMarketTemplate(input: CreateMarketInput): Market {
     traders: 0,
     closesAt: input.closesAt,
     history,
+    source: "internal",
   };
   store.globalTemplates.unshift(market);
   store.platformActivity.unshift({

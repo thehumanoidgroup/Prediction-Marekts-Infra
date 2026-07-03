@@ -13,6 +13,16 @@ def test_list_markets(client: TestClient):
     assert "markets" in data
     assert len(data["markets"]) >= 4
     assert "yesPrice" in data["markets"][0]
+    assert data["markets"][0]["source"] == "internal"
+    assert data["source"] == "all"
+    assert "counts" in data
+
+
+def test_list_markets_internal_only(client: TestClient):
+    response = client.get("/api/v1/trading/markets?source=internal", headers=HEADERS)
+    assert response.status_code == 200
+    data = response.json()
+    assert all(market["source"] == "internal" for market in data["markets"])
 
 
 def test_portfolio_and_order(client: TestClient):

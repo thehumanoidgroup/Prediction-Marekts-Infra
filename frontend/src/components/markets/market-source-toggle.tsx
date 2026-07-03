@@ -2,36 +2,36 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
+import type { MarketViewSource } from "@/lib/types";
 
-export type MarketSource = "internal" | "polymarket";
-
-const options: { id: MarketSource; label: string; description: string }[] = [
-  { id: "internal", label: "Internal Markets", description: "PropPredict LMSR" },
-  { id: "polymarket", label: "Polymarket Markets", description: "Live CLOB feed" },
+const options: { id: MarketViewSource; label: string; description: string }[] = [
+  { id: "all", label: "All Markets", description: "Internal + Polymarket" },
+  { id: "internal", label: "Internal", description: "PropPredict LMSR" },
+  { id: "polymarket", label: "Polymarket", description: "Live CLOB feed" },
 ];
 
-/** Segmented control toggling between internal LMSR and Polymarket listings. */
+/** Segmented control for internal, Polymarket, or hybrid market listings. */
 export function MarketSourceToggle({
   className,
   value,
   onChange,
 }: {
   className?: string;
-  value?: MarketSource;
-  onChange?: (source: MarketSource) => void;
+  value?: MarketViewSource;
+  onChange?: (source: MarketViewSource) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const urlSource = (searchParams.get("source") as MarketSource | null) ?? "internal";
+  const urlSource = (searchParams.get("source") as MarketViewSource | null) ?? "all";
   const source = value ?? urlSource;
 
-  const setSource = (next: MarketSource) => {
+  const setSource = (next: MarketViewSource) => {
     onChange?.(next);
     if (onChange) return;
 
     const params = new URLSearchParams(searchParams.toString());
-    if (next === "internal") params.delete("source");
+    if (next === "all") params.delete("source");
     else params.set("source", next);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
@@ -51,7 +51,7 @@ export function MarketSourceToggle({
             type="button"
             onClick={() => setSource(option.id)}
             className={cn(
-              "relative rounded-lg px-3 py-2 text-left transition-all sm:px-4",
+              "relative rounded-lg px-2.5 py-2 text-left transition-all sm:px-3",
               active
                 ? "bg-surface-3 text-foreground shadow-sm"
                 : "text-muted hover:text-foreground",
@@ -60,7 +60,10 @@ export function MarketSourceToggle({
             <span className="block text-xs font-semibold sm:text-sm">{option.label}</span>
             <span className="mt-0.5 hidden text-[10px] text-faint sm:block">{option.description}</span>
             {option.id === "polymarket" && active ? (
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-up live-pulse" />
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-up live-pulse" />
+            ) : null}
+            {option.id === "all" && active ? (
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent live-pulse" />
             ) : null}
           </button>
         );
@@ -69,7 +72,9 @@ export function MarketSourceToggle({
   );
 }
 
-export function useMarketSource(): MarketSource {
+export function useMarketSource(): MarketViewSource {
   const searchParams = useSearchParams();
-  return (searchParams.get("source") as MarketSource | null) ?? "internal";
+  const raw = searchParams.get("source") as MarketViewSource | null;
+  if (raw === "internal" || raw === "polymarket") return raw;
+  return "all";
 }
