@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  trader
+  prop_firm_admin
+  super_admin
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  clientKey String   @unique @map("client_key")
+  name      String
+  tagline   String   @default("")
+  isActive  Boolean  @default(true) @map("is_active")
+  branding  Json
+  features  Json
+  program   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  users     User[]
+
+  @@map("tenants")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  tenantId       String?  @map("tenant_id")
+  tenant         Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email          String
+  displayName    String   @map("display_name")
+  hashedPassword String   @map("hashed_password")
+  role           UserRole @default(trader)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, email])
+  @@map("users")
+}

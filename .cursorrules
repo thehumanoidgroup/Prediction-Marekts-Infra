@@ -2,32 +2,38 @@
 
 ## Project overview
 
-PropPredict is a white-label prediction markets platform for prop firms. The stack is:
+PropPredict is a **single Next.js 15 application** (App Router) deployable on Vercel. There is no separate backend — all API routes live under `app/api/`.
 
-- **Backend**: FastAPI (`backend/`), PostgreSQL, Redis, LMSR internal markets
-- **Frontend**: Next.js (`frontend/`), fortraders.com-inspired trader UI
-- **Multi-tenant**: firm-scoped branding via DB-backed tenant config
+- **Stack**: Next.js 15, React 19, Tailwind CSS v4, Prisma (PostgreSQL), in-memory LMSR trading engine
+- **Multi-tenant**: firm-scoped branding via middleware + Prisma `Tenant` model
+- **Polymarket**: TypeScript CLOB integration in `lib/polymarket/`
 
-## Polymarket integration
+## Structure
 
-Polymarket CLOB integration is a first-class part of this project.
+```
+app/           # Pages and API routes
+components/    # UI components
+lib/           # Core utilities, store, polymarket, auth, db
+services/      # Business logic (markets, portfolio, orders)
+hooks/         # Client hooks
+types/         # Shared TypeScript types
+prisma/        # Database schema (Tenant, User)
+middleware.ts  # Tenant resolution
+```
 
-- **Package**: `backend/integrations/polymarket/`
-  - `PolymarketClient` — async wrapper around `py-clob-client-v2`
-  - `PolymarketService` — caching, normalization, search, health checks
-  - `rate_limiter.py` — outbound request throttling
-- **Config**: `PP_POLYMARKET_*` env vars in `backend/app/core/config.py` (see `.env.example`)
-- **API routes**: `backend/app/api/routes/polymarket.py` (`/api/polymarket/*`)
-- **Hybrid markets**: `backend/app/runtime/hybrid_markets.py` merges internal LMSR + Polymarket feeds
-- **Trading API**: `GET /api/v1/trading/markets?source=internal|polymarket|all`
-- **Frontend**: Polymarket cards, three-way source toggle (All / Internal / Polymarket), `/markets` explorer
-- **Docs**: `backend/integrations/polymarket/README.md`, Super Admin `/platform/integrations`
+## API routes
 
-When adding market features, preserve the unified market shape (`source: "internal" | "polymarket"`) and keep UI consistent with internal `MarketCard` styling.
+All backend logic runs as Next.js Route Handlers under `app/api/`:
+
+- `/api/auth/*` — JWT login, register, me
+- `/api/markets`, `/api/orders`, `/api/portfolio`, `/api/journal`
+- `/api/polymarket/*` — Polymarket CLOB market discovery
+- `/api/tenant`, `/api/admin/tenant` — white-label config
+- `/api/platform/*` — Super Admin endpoints
 
 ## Conventions
 
+- Frontend calls `/api/...` only — never external backend URLs
 - Match existing code style; keep diffs focused
-- Backend tests: `cd backend && pytest tests/ -q`
-- Frontend build: `cd frontend && npm run build`
+- `npm run build` must pass before shipping
 - Branch prefix for agent work: `cursor/<name>-224f`
