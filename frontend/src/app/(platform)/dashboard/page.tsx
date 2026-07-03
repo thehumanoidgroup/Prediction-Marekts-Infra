@@ -12,6 +12,7 @@ export default async function DashboardPage() {
   const remotePortfolio = await fetchBackendPortfolio(tenant.slug);
   const remoteJournal = await fetchBackendJournal(tenant.slug);
   const remoteMarkets = await fetchBackendMarkets(tenant.slug, { sort: "movers" });
+  const internalMarketsRemote = await fetchBackendMarkets(tenant.slug, { sort: "volume" });
 
   const initial = remotePortfolio
     ? {
@@ -29,5 +30,10 @@ export default async function DashboardPage() {
         movers: listMarkets({ sort: "movers" }).slice(0, 5),
       };
 
-  return <DashboardClient tenant={tenant} initial={initial} />;
+  const internalMarkets =
+    internalMarketsRemote?.markets ?? listMarkets({ sort: "volume" });
+
+  return (
+    <DashboardClient tenant={tenant} initial={initial} internalMarkets={internalMarkets} />
+  );
 }

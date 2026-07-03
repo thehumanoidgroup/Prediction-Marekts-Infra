@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { TenantConfig } from "@/lib/tenants";
+import type { Market } from "@/lib/types";
 import type { DashboardData } from "@/lib/hooks/use-dashboard-data";
 import { useDashboardData } from "@/lib/hooks/use-dashboard-data";
 import {
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { ChallengePanel } from "@/components/dashboard/challenge-panel";
+import { DashboardMarketsSection } from "@/components/dashboard/dashboard-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { LivePositionsTable } from "@/components/dashboard/live-positions";
@@ -38,9 +40,11 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
 export function DashboardClient({
   tenant,
   initial,
+  internalMarkets = [],
 }: {
   tenant: TenantConfig;
   initial?: Partial<DashboardData>;
+  internalMarkets?: Market[];
 }) {
   const { portfolio, journal, movers, refreshing, reload } = useDashboardData(initial);
 
@@ -196,6 +200,8 @@ export function DashboardClient({
           </Card>
 
           <JournalCard entries={journalEntries} />
+
+          <DashboardMarketsSection internalMarkets={internalMarkets} />
         </div>
       </div>
     </div>

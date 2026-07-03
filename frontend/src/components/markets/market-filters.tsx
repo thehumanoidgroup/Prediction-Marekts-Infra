@@ -22,7 +22,7 @@ const sorts = [
 ];
 
 /** Category tabs, sort toggle and debounced search, synced to the URL. */
-export function MarketFilters() {
+export function MarketFilters({ hideSort = false }: { hideSort?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -61,23 +61,25 @@ export function MarketFilters() {
             className="h-10 w-full rounded-lg border border-edge bg-surface pl-9 pr-3 text-sm text-foreground placeholder:text-faint outline-none transition-colors focus:border-edge-strong"
           />
         </div>
-        <div className="flex rounded-lg border border-edge bg-surface p-0.5">
-          {sorts.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setParam("sort", option.id, "volume")}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                sort === option.id
-                  ? "bg-surface-3 text-foreground"
-                  : "text-muted hover:text-foreground",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {!hideSort ? (
+          <div className="flex rounded-lg border border-edge bg-surface p-0.5">
+            {sorts.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setParam("sort", option.id, "volume")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  sort === option.id
+                    ? "bg-surface-3 text-foreground"
+                    : "text-muted hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">

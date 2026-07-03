@@ -113,6 +113,16 @@ export function IconClock(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconExternalLink(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M14 5h5v5" />
+      <path d="M10 14L19 5" />
+      <path d="M19 14v5H5V5h5" />
+    </Icon>
+  );
+}
+
 export function IconUsers(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

@@ -98,6 +98,60 @@ export async function fetchBackendJournal(tenantSlug: string): Promise<JournalPa
   return backendFetch<JournalPayload>("/journal", { tenantSlug });
 }
 
+async function backendFetchRoot<T>(
+  path: string,
+  options: { search?: Record<string, string> } = {},
+): Promise<T | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+
+  const url = new URL(`${base}/api/v1${path}`);
+  if (options.search) {
+    for (const [key, value] of Object.entries(options.search)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof err.detail === "string"
+          ? err.detail
+          : `Backend error ${response.status}`,
+      );
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    console.error(`[backend] ${path}:`, error);
+    return null;
+  }
+}
+
+export async function fetchBackendPolymarketMarkets(
+  filters: { query?: string; active?: boolean; refresh?: boolean } = {},
+): Promise<MarketsPayload | null> {
+  return backendFetchRoot<MarketsPayload>("/polymarket/markets", {
+    search: {
+      q: filters.query ?? "",
+      active: filters.active ? "true" : "false",
+      refresh: filters.refresh ? "true" : "false",
+    },
+  });
+}
+
+export async function fetchBackendPolymarketMarket(
+  marketId: string,
+): Promise<{ market: Market } | null> {
+  return backendFetchRoot<{ market: Market }>(`/polymarket/markets/${encodeURIComponent(marketId)}`);
+}
+
 export async function postBackendOrder(
   tenantSlug: string,
   input: { marketId: string; outcome: Outcome; side: "buy" | "sell"; shares: number },

@@ -39,7 +39,25 @@ export interface Market {
   closesAt: number;
   resolvedOutcome?: Outcome;
   history: PricePoint[];
+  /** Present when market is sourced from Polymarket CLOB. */
+  source?: "polymarket" | "internal";
+  externalConditionId?: string;
+  marketSlug?: string | null;
+  acceptingOrders?: boolean;
+  outcomes?: PolymarketOutcome[];
 }
+
+export interface PolymarketOutcome {
+  tokenId?: string;
+  label?: string;
+  price: number;
+  winner?: boolean;
+}
+
+export type PolymarketMarket = Market & {
+  source: "polymarket";
+  externalConditionId: string;
+};
 
 export interface Position {
   id: string;
