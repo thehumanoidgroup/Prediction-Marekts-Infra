@@ -1,216 +1,112 @@
 # PropPredict
 
-A professional, white-label **prediction markets platform for prop firms**. Each firm gets a fully branded trading environment — evaluation challenges, prediction market trading, equity curves, a trading journal, and leaderboards — served from a single deployment.
+A professional, white-label **prediction markets platform for prop firms**. Each firm gets a fully branded trading environment — evaluation challenges, prediction market trading, equity curves, a trading journal, and leaderboards — from a **single Vercel deployment**.
 
 ## Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | Next.js 15 (App Router, React 19), Tailwind CSS v4, shadcn/ui conventions, Recharts |
-| Backend | FastAPI (Python 3.12), SQLAlchemy 2 (async), Alembic |
-| Database | PostgreSQL 17 (SQLite fallback for bare local dev) |
-| Cache / Pub-Sub | Redis 7 |
-| Real-time | WebSockets (per-tenant channels, Redis-backed fan-out) |
-| Auth | JWT (bearer) with roles: `Trader`, `PropFirmAdmin`, `SuperAdmin` |
-| Deployment | Docker + docker-compose |
+| Framework | Next.js 15 (App Router, React 19) |
+| Styling | Tailwind CSS v4, shadcn/ui conventions, Recharts |
+| Database | PostgreSQL via Prisma (`Tenant`, `User`) |
+| Trading engine | In-memory LMSR market maker (`lib/store.ts`) |
+| Polymarket | TypeScript CLOB client (`lib/polymarket/`) |
+| Auth | JWT (jose) + bcrypt password hashing |
+| Deployment | **Vercel** — one repo, one build, no separate backend |
 
 ## Project structure
 
 ```
 .
-├── docker-compose.yml         # postgres + redis + backend + frontend
-├── .env.example               # copy to .env
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── alembic/               # database migrations
-│   └── app/
-│       ├── main.py            # FastAPI app factory, CORS, lifespan (seed, ticker)
-│       ├── core/
-│       │   ├── config.py      # pydantic-settings (PP_* env vars)
-│       │   └── security.py    # JWT issue/verify, password hashing
-│       ├── db/
-│       │   ├── session.py     # async engine + request-scoped sessions
-│       │   └── seed.py        # idempotent dev seed (tenants + demo users)
-│       ├── models/            # SQLAlchemy: Tenant, User (+ roles)
-│       ├── schemas/           # Pydantic request/response models
-│       ├── api/
-│       │   ├── deps.py        # tenant resolution, current user, role guards
-│       │   └── routes/        # auth, tenants, trading, polymarket, health, ws
-│       ├── integrations/
-│       │   └── polymarket/    # py-clob-client-v2 wrapper, service, caching
-│       └── ws/
-│           ├── manager.py     # tenant-aware WebSocket fan-out via Redis pub/sub
-│           └── ticker.py      # demo market price broadcaster
-└── frontend/
-    ├── Dockerfile
-    ├── components.json        # shadcn/ui configuration
-    └── src/
-        ├── middleware.ts      # tenant resolution: query → subdomain → cookie
-        ├── lib/               # tenant registry, domain types, services, formatting
-        ├── app/
-        │   ├── layout.tsx     # injects tenant brand CSS variables on <html>
-        │   ├── (platform)/    # dashboard, markets, portfolio, journal, leaderboard, settings
-        │   └── api/           # demo REST endpoints (markets, orders, portfolio…)
-        └── components/        # ui primitives, app shell, charts, dashboard, markets
+├── app/
+│   ├── (platform)/          # Dashboard, markets, admin, platform pages
+│   └── api/                 # All backend endpoints (Route Handlers)
+├── components/              # UI, dashboard, markets, admin, platform
+├── hooks/                   # Client data hooks
+├── lib/                     # Store, auth, db, polymarket, tenants
+├── services/                # Business logic layer
+├── types/                   # Shared TypeScript types
+├── prisma/schema.prisma     # Database schema
+├── middleware.ts            # Tenant resolution (query → subdomain → cookie)
+├── package.json
+├── next.config.ts
+└── .env.example
 ```
 
-## Quick start (Docker)
+## Quick start
 
 ```bash
-cp .env.example .env
-docker compose up --build
-```
+cp .env.example .env.local
+# Set DATABASE_URL to a PostgreSQL connection string
 
-- Frontend: [http://localhost:3000](http://localhost:3000)
-- API: [http://localhost:8000](http://localhost:8000) · interactive docs at [/docs](http://localhost:8000/docs)
-- Postgres: `localhost:5432` · Redis: `localhost:6379`
-
-On first boot the backend creates tables and seeds two demo firms (`app`, `apex`) with one user per role.
-
-## Local development (without Docker)
-
-### Backend
-
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-Without `PP_DATABASE_URL` set, the backend falls back to a local SQLite file so it runs with zero infrastructure. Point it at Postgres with:
-
-```bash
-export PP_DATABASE_URL=postgresql+asyncpg://proppredict:proppredict@localhost:5432/proppredict
-```
-
-### Frontend
-
-```bash
-cd frontend
 npm install
-npm run dev
+npx prisma db push    # create tables
+npm run dev           # http://localhost:3000
 ```
 
-## Demo credentials
+### Demo credentials (after first DB seed)
 
-Seeded in development (password for all: `demo-password-123`):
-
-| Role | Email | Tenant |
+| Tenant | Trader | Admin |
 | --- | --- | --- |
-| Trader | `trader@app.proppredict.com` | PropPredict (`app`) |
-| PropFirmAdmin | `admin@app.proppredict.com` | PropPredict (`app`) |
-| SuperAdmin | `root@proppredict.com` | platform-wide |
-| Trader | `trader@apex.proppredict.com` | Apex Forecast (`apex`) |
-| PropFirmAdmin | `admin@apex.proppredict.com` | Apex Forecast (`apex`) |
+| `app` (default) | `trader@app.demo` | `admin@app.demo` |
+| `apex` (`?tenant=apex`) | `trader@apex.demo` | `admin@apex.demo` |
+| `nova` (`?tenant=nova`) | `trader@nova.demo` | `admin@nova.demo` |
 
-## Multi-tenancy & white-labeling
+Password for all demo users: `demo-password-123`
 
-- **Backend:** every request resolves a tenant from the `X-Tenant-Slug` header (or the subdomain in production) via the `get_current_tenant` dependency. JWTs embed the tenant id; a token minted for one firm is rejected on another firm's domain. All tenant-owned tables carry a `tenant_id` foreign key.
-- **Theming:** `GET /api/v1/tenants/current` returns the firm's white-label config (colors, logo, name, feature flags, program rules). The frontend applies branding as CSS variables on `<html>`, so the entire UI re-skins per firm with zero component changes. Firm admins update their theme via `PATCH /api/v1/tenants/current`.
-- **Roles:** `Trader` (trades markets), `PropFirmAdmin` (manages one firm's traders, branding, and program), `SuperAdmin` (onboards firms platform-wide). Enforced by the `require_roles(...)` dependency; SuperAdmin implicitly passes every check.
+Super Admin: `super@proppredict.demo`
+
+## Deploy to Vercel
+
+1. Import this GitHub repository into Vercel
+2. Set environment variables from `.env.example` (at minimum `SECRET_KEY` and `DATABASE_URL`)
+3. Deploy — no additional backend service required
+
+Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-postgres) or [Neon](https://neon.tech) for `DATABASE_URL`.
 
 ## API overview
 
-| Endpoint | Method | Auth | Description |
-| --- | --- | --- | --- |
-| `/health` | GET | — | Liveness probe |
-| `/api/v1/auth/register` | POST | — | Trader signup (tenant-scoped) |
-| `/api/v1/auth/login` | POST | — | Login → JWT |
-| `/api/v1/auth/me` | GET | any role | Current user |
-| `/api/v1/tenants/current` | GET | — | White-label config for the requesting firm |
-| `/api/v1/tenants/current` | PATCH | PropFirmAdmin | Update branding / features / program |
-| `/api/v1/tenants` | GET/POST | SuperAdmin | List / onboard firms |
-| `/api/polymarket/markets` | GET | — | List Polymarket markets (paginated, filterable) |
-| `/api/polymarket/markets/{id}` | GET | — | Single Polymarket market |
-| `/api/polymarket/search` | GET | — | Search Polymarket markets (`q` required) |
-| `/api/polymarket/status` | GET | — | Polymarket CLOB + cache health |
-| `/ws/markets/{tenant_slug}` | WS | — | Real-time price ticks (per-tenant channel) |
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/health` | GET | Liveness check |
+| `/api/auth/login` | POST | JWT login |
+| `/api/auth/register` | POST | Trader signup |
+| `/api/auth/me` | GET | Current user (Bearer token) |
+| `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket`) |
+| `/api/markets/[id]` | GET | Single market |
+| `/api/orders` | POST | Place order |
+| `/api/portfolio` | GET | Portfolio snapshot |
+| `/api/journal` | GET, POST | Trading journal |
+| `/api/tenant` | GET | Public tenant config |
+| `/api/polymarket/markets` | GET | Polymarket CLOB listings |
+| `/api/polymarket/search` | GET | Search Polymarket markets |
+| `/api/platform/integrations/polymarket` | GET | Integration health |
 
-## Real-time pipeline
+## Multi-tenancy
 
-`app/ws/ticker.py` broadcasts simulated price ticks through the same path production trades will take: **publisher → Redis pub/sub → every API replica → tenant's WebSocket clients**. Without Redis (bare local dev) fan-out degrades gracefully to in-process delivery.
+Tenant resolution order (see `middleware.ts`):
 
-## Migrations
-
-```bash
-cd backend
-alembic revision --autogenerate -m "description"
-alembic upgrade head
-```
-
-In development the app auto-creates tables on startup; production should rely on Alembic only.
+1. `?tenant=<id>` query param (persisted to cookie)
+2. Subdomain (`apex.yourdomain.com`)
+3. `pp-tenant` cookie
+4. Default tenant (`proppredict`)
 
 ## Polymarket integration
 
-PropPredict can display live [Polymarket](https://polymarket.com) prediction markets alongside internal LMSR markets. The integration uses the official [`py-clob-client-v2`](https://github.com/Polymarket/py-clob-client-v2) SDK, wrapped for async use and Redis caching.
+Read-only Polymarket CLOB listings work out of the box. Optional env vars for trading credentials:
 
-**Detailed docs:** [`backend/integrations/polymarket/README.md`](backend/integrations/polymarket/README.md)
+- `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
+- `POLYMARKET_PRIVATE_KEY`
 
-### Enable
-
-1. Dependency is already in `backend/requirements.txt` (`py-clob-client-v2`).
-2. Set environment variables (read-only mode works with defaults only):
+## Development
 
 ```bash
-PP_POLYMARKET_HOST=https://clob.polymarket.com
-PP_POLYMARKET_CHAIN_ID=137
-PP_REDIS_URL=redis://localhost:6379/0   # recommended for caching
+npm run dev        # Start dev server
+npm run build      # Production build
+npm run typecheck  # TypeScript check
+npx prisma studio  # Browse database
 ```
 
-Optional credentials for authenticated trading (L2):
+## License
 
-```bash
-PP_POLYMARKET_PRIVATE_KEY=0x...
-PP_POLYMARKET_API_KEY=...
-PP_POLYMARKET_API_SECRET=...
-PP_POLYMARKET_API_PASSPHRASE=...
-```
-
-3. Restart the backend. Verify connectivity:
-
-```bash
-curl http://localhost:8000/api/polymarket/status
-```
-
-### Python SDK wrapper
-
-```python
-import asyncio
-from integrations.polymarket import PolymarketClient, get_polymarket_service
-
-async def main() -> None:
-    # Low-level async client (wraps py-clob-client-v2)
-    client = PolymarketClient.from_settings()
-    page = await client.get_markets()
-    print(len(page.data), "markets on first page")
-
-    # High-level cached service
-    service = get_polymarket_service()
-    markets = await service.get_active_markets()
-    print(len(markets), "active markets")
-
-asyncio.run(main())
-```
-
-### REST examples
-
-```bash
-# List active markets (paginated)
-curl "http://localhost:8000/api/polymarket/markets?active=true&page=1&pageSize=10"
-
-# Search
-curl "http://localhost:8000/api/polymarket/search?q=bitcoin"
-
-# Single market
-curl "http://localhost:8000/api/polymarket/markets/poly-0x..."
-```
-
-### Trader UI
-
-- `/markets` — toggle **All Markets** / **Internal** / **Polymarket** (hybrid view is the default)
-- `/dashboard` — hybrid preview section with the same three-way toggle
-- `/platform/integrations` — Super Admin connection status (SuperAdmin)
-
-Hybrid listings use `GET /api/v1/trading/markets?source=all` (default) and return per-source counts.
+Proprietary — thehumanoidgroup
