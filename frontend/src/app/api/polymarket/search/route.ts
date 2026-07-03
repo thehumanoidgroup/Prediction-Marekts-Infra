@@ -5,6 +5,10 @@ import { getMockPolymarketMarkets } from "@/lib/polymarket-mock";
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const query = params.get("q") ?? "";
+  if (!query.trim()) {
+    return NextResponse.json({ error: "q is required" }, { status: 400 });
+  }
+
   const active = params.get("active") === "true";
   const refresh = params.get("refresh") === "true";
   const category = params.get("category") ?? "all";
@@ -30,6 +34,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     markets: slice,
+    query,
     pagination: {
       page,
       pageSize,
@@ -38,6 +43,5 @@ export async function GET(request: NextRequest) {
       hasNext: page < totalPages,
       hasPrev: page > 1,
     },
-    ...(query ? { query } : {}),
   });
 }

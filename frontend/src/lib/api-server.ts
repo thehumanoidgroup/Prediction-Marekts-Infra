@@ -20,6 +20,20 @@ export interface MarketsPayload {
   markets: Market[];
 }
 
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+export interface PolymarketMarketsPayload extends MarketsPayload {
+  pagination?: PaginationMeta;
+  query?: string;
+}
+
 export interface JournalPayload {
   journal: JournalEntry[];
 }
@@ -135,15 +149,30 @@ async function backendFetchRoot<T>(
 }
 
 export async function fetchBackendPolymarketMarkets(
-  filters: { query?: string; active?: boolean; refresh?: boolean } = {},
-): Promise<MarketsPayload | null> {
-  return backendFetchRoot<MarketsPayload>("/polymarket/markets", {
-    search: {
-      q: filters.query ?? "",
-      active: filters.active ? "true" : "false",
-      refresh: filters.refresh ? "true" : "false",
-    },
-  });
+  filters: {
+    query?: string;
+    active?: boolean;
+    refresh?: boolean;
+    category?: string;
+    sort?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<PolymarketMarketsPayload | null> {
+  const params = new URLSearchParams();
+  if (filters.query) params.set("q", filters.query);
+  if (filters.active) params.set("active", "true");
+  if (filters.refresh) params.set("refresh", "true");
+  if (filters.category && filters.category !== "all") params.set("category", filters.category);
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+
+  const path = filters.query
+    ? `/polymarket/search?${params.toString()}`
+    : `/polymarket/markets?${params.toString()}`;
+
+  return backendFetchRoot<PolymarketMarketsPayload>(path);
 }
 
 export async function fetchBackendPolymarketMarket(

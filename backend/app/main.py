@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(tenants.router, prefix="/api/v1")
     app.include_router(trading.router, prefix="/api/v1")
-    app.include_router(polymarket.router, prefix="/api/v1")
+    app.include_router(polymarket.router, prefix="/api")
     app.include_router(ws.router)
 
     return app
