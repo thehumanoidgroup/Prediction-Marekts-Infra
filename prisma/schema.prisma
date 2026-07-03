@@ -13,19 +13,53 @@ enum UserRole {
   super_admin
 }
 
+/// Evaluation program tier sold to a trader (1-step, 2-step, etc.).
+enum PropFirmModelType {
+  one_step   @map("1step")
+  two_step   @map("2step")
+  three_step @map("3step")
+  instant
+}
+
+/// Nominal account size tier for a sold prop firm account.
+enum AccountSize {
+  size_10k   @map("10K")
+  size_25k   @map("25K")
+  size_50k   @map("50K")
+  size_100k  @map("100K")
+  size_500k  @map("500K")
+  size_1m    @map("1M")
+  size_2m    @map("2M")
+}
+
+/// Lifecycle of automated account provisioning.
+enum PropFirmAccountStatus {
+  pending
+  provisioned
+  activated
+  expired
+}
+
+/// Whether max bet size is expressed as a percentage or fixed USD amount.
+enum MaxBetSizeMode {
+  percent
+  fixed
+}
+
 model Tenant {
-  id        String   @id @default(uuid())
-  slug      String   @unique
-  clientKey String   @unique @map("client_key")
-  name      String
-  tagline   String   @default("")
-  isActive  Boolean  @default(true) @map("is_active")
-  branding  Json
-  features  Json
-  program   Json
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  users     User[]
+  id               String            @id @default(uuid())
+  slug             String            @unique
+  clientKey        String            @unique @map("client_key")
+  name             String
+  tagline          String            @default("")
+  isActive         Boolean           @default(true) @map("is_active")
+  branding         Json
+  features         Json
+  program          Json
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  users            User[]
+  propFirmAccounts PropFirmAccount[]
 
   @@map("tenants")
 }
@@ -44,4 +78,63 @@ model User {
 
   @@unique([tenantId, email])
   @@map("users")
+}
+
+/// A sold prop firm evaluation account awaiting or after automated provisioning.
+model PropFirmAccount {
+  id                String                @id @default(uuid())
+  propFirmId        String                @map("prop_firm_id")
+  propFirm          Tenant                @relation(fields: [propFirmId], references: [id], onDelete: Cascade)
+  traderEmail       String                @map("trader_email")
+  modelType         PropFirmModelType     @map("model_type")
+  accountSize       AccountSize           @map("account_size")
+  status            PropFirmAccountStatus @default(pending)
+  purchasedAt       DateTime              @map("purchased_at")
+  credentialsSentAt DateTime?             @map("credentials_sent_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  challengeConfig   ChallengeConfig?
+  traderDemoAccount TraderDemoAccount?
+
+  @@index([propFirmId])
+  @@index([traderEmail])
+  @@index([status])
+  @@index([purchasedAt])
+  @@index([propFirmId, status])
+  @@map("prop_firm_accounts")
+}
+
+/// Challenge rules attached to a single sold account.
+model ChallengeConfig {
+  id                 String          @id @default(uuid())
+  propFirmAccountId  String          @unique @map("prop_firm_account_id")
+  propFirmAccount    PropFirmAccount @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
+  profitTarget       Decimal         @map("profit_target") @db.Decimal(8, 4)
+  dailyDrawdown      Decimal         @map("daily_drawdown") @db.Decimal(8, 4)
+  maxDrawdown        Decimal         @map("max_drawdown") @db.Decimal(8, 4)
+  maxBetSizeValue    Decimal         @map("max_bet_size_value") @db.Decimal(14, 2)
+  maxBetSizeMode     MaxBetSizeMode  @default(percent) @map("max_bet_size_mode")
+  consistencyScore   Decimal?        @map("consistency_score") @db.Decimal(8, 4)
+  otherCustomRules   Json            @default("{}") @map("other_custom_rules")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  traderDemoAccounts TraderDemoAccount[]
+
+  @@map("challenge_configs")
+}
+
+/// Provisioned demo trading account with encrypted login credentials.
+model TraderDemoAccount {
+  id                    String          @id @default(uuid())
+  propFirmAccountId     String          @unique @map("prop_firm_account_id")
+  propFirmAccount       PropFirmAccount @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
+  challengeConfigId     String          @map("challenge_config_id")
+  challengeConfig       ChallengeConfig @relation(fields: [challengeConfigId], references: [id], onDelete: Restrict)
+  virtualBalance        Decimal         @map("virtual_balance") @db.Decimal(14, 2)
+  loginCredentials      String          @map("login_credentials") @db.Text
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  @@index([challengeConfigId])
+  @@map("trader_demo_accounts")
 }
