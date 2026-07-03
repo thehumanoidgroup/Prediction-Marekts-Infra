@@ -235,7 +235,31 @@ def _matches_query(market: dict[str, Any], query: str) -> bool:
 
 
 class PolymarketService:
-    """Cached Polymarket market access layer for PropPredict."""
+    """Cached Polymarket market access layer for PropPredict.
+
+    Example
+    -------
+    Basic read-only usage::
+
+        service = get_polymarket_service()
+        markets = await service.get_active_markets()
+        one = await service.get_market_by_id("poly-0x...")
+
+    Search with cache refresh::
+
+        results = await service.search_markets("bitcoin", refresh=True)
+
+    Operator health check::
+
+        status = await service.get_integration_status()
+        assert status["healthy"]
+
+    Authenticated trading (requires ``PP_POLYMARKET_PRIVATE_KEY``)::
+
+        service = get_polymarket_service()
+        await service.ensure_authenticated()
+        # downstream trading endpoints can use service.client.can_trade
+    """
 
     def __init__(
         self,
@@ -329,6 +353,22 @@ class PolymarketService:
         """Case-insensitive search across question, slug, category, and outcomes."""
         markets = await self.get_all_markets(refresh=refresh)
         return [market for market in markets if _matches_query(market, query)]
+
+    async def ensure_authenticated(self) -> None:
+        """Derive L2 API credentials from ``PP_POLYMARKET_PRIVATE_KEY`` when needed.
+
+        No-op when API credentials are already configured or no private key is set.
+        Raises :class:`PolymarketAuthError` when a private key is present but
+        credential derivation fails.
+        """
+        if self._client.is_authenticated or not self._client.has_wallet:
+            return
+        await self._client.authenticate()
+
+    @property
+    def client(self) -> PolymarketClient:
+        """Underlying async CLOB client."""
+        return self._client
 
     async def invalidate_cache(self) -> None:
         """Clear Polymarket cache entries (Redis + in-process fallback)."""

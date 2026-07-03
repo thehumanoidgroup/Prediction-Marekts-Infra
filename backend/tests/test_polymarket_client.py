@@ -17,8 +17,10 @@ from integrations.polymarket import (
     PolymarketAuthError,
     PolymarketClient,
     PolymarketError,
+    PolymarketRateLimitError,
     PolymarketTimeoutError,
 )
+from integrations.polymarket.polymarket_client import _resolve_credentials
 
 
 @pytest.fixture
@@ -172,6 +174,72 @@ async def test_poly_exception_auth_message_maps_to_auth_error(
 
     with pytest.raises(PolymarketAuthError):
         await public_client.get_market("0xneed-creds")
+
+
+def test_resolve_credentials_requires_full_triple() -> None:
+    key, secret, passphrase = _resolve_credentials(
+        api_key="key",
+        api_secret=None,
+        api_passphrase="pass",
+    )
+
+    assert (key, secret, passphrase) == (None, None, None)
+
+
+def test_resolve_credentials_passes_complete_triple() -> None:
+    key, secret, passphrase = _resolve_credentials(
+        api_key="key",
+        api_secret="secret",
+        api_passphrase="pass",
+    )
+
+    assert key == "key"
+    assert secret == "secret"
+    assert passphrase == "pass"
+
+
+def test_incomplete_credentials_disable_authentication() -> None:
+    client = PolymarketClient(
+        api_key="key",
+        api_secret=None,
+        api_passphrase="pass",
+    )
+
+    assert client.is_authenticated is False
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_429_retries_then_raises(
+    public_client: PolymarketClient,
+) -> None:
+    response = httpx.Response(429, json={"error": "rate limited"})
+    public_client._max_retries = 2
+    public_client._retry_backoff_seconds = 0.01
+    public_client._client.get_market = MagicMock(
+        side_effect=PolyApiException(resp=response)
+    )
+
+    with pytest.raises(PolymarketRateLimitError) as exc_info:
+        await public_client.get_market("0xrate")
+
+    assert exc_info.value.status_code == 429
+    assert public_client._client.get_market.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_429_recovers_on_retry(public_client: PolymarketClient) -> None:
+    response = httpx.Response(429, json={"error": "rate limited"})
+    market = {"condition_id": "0xok", "question": "Recovered?"}
+    public_client._max_retries = 2
+    public_client._retry_backoff_seconds = 0.01
+    public_client._client.get_market = MagicMock(
+        side_effect=[PolyApiException(resp=response), market]
+    )
+
+    result = await public_client.get_market("0xok")
+
+    assert result == market
+    assert public_client._client.get_market.call_count == 2
 
 
 @pytest.mark.asyncio

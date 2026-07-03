@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     polymarket_cache_ttl_seconds: float = 300.0
     polymarket_list_cache_ttl_seconds: float = 600.0
     polymarket_max_fetch_pages: int | None = 10
+    polymarket_rate_limit_per_minute: int = 60
+    polymarket_rate_limit_burst: int = 10
+    polymarket_max_retries: int = 3
+    polymarket_retry_backoff_seconds: float = 0.5
 
 
 @lru_cache

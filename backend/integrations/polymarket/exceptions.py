@@ -10,6 +10,8 @@ PolymarketApiError
     Non-success HTTP response from the CLOB API (``status_code`` set).
 PolymarketTimeoutError
     SDK call exceeded ``PP_POLYMARKET_REQUEST_TIMEOUT_SECONDS``.
+PolymarketRateLimitError
+    CLOB returned HTTP 429 after retries were exhausted.
 """
 
 from __future__ import annotations
@@ -47,3 +49,7 @@ class PolymarketApiError(PolymarketError):
 
 class PolymarketTimeoutError(PolymarketError):
     """Raised when a Polymarket SDK call exceeds the configured timeout."""
+
+
+class PolymarketRateLimitError(PolymarketApiError):
+    """Raised when the Polymarket CLOB API returns HTTP 429 (rate limited)."""

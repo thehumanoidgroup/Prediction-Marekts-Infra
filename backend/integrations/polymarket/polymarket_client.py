@@ -20,13 +20,33 @@ from .exceptions import (
     PolymarketApiError,
     PolymarketAuthError,
     PolymarketError,
+    PolymarketRateLimitError,
     PolymarketTimeoutError,
 )
+from .rate_limiter import AsyncRateLimiter
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "https://clob.polymarket.com"
 DEFAULT_CHAIN_ID = 137  # Polygon mainnet — mirrors viem `polygon` chain id
+
+
+def _resolve_credentials(
+    *,
+    api_key: str | None,
+    api_secret: str | None,
+    api_passphrase: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Validate API credential triples loaded from ``PP_POLYMARKET_*`` env vars."""
+    fields = (api_key, api_secret, api_passphrase)
+    if any(fields) and not all(fields):
+        logger.warning(
+            "Incomplete Polymarket API credentials in environment — "
+            "set PP_POLYMARKET_API_KEY, PP_POLYMARKET_API_SECRET, and "
+            "PP_POLYMARKET_API_PASSPHRASE together."
+        )
+        return None, None, None
+    return api_key, api_secret, api_passphrase
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,14 +95,29 @@ class PolymarketClient:
         request_timeout_seconds: float = 30.0,
         use_server_time: bool = False,
         retry_on_error: bool = False,
+        rate_limit_per_minute: int = 60,
+        rate_limit_burst: int = 10,
+        max_retries: int = 3,
+        retry_backoff_seconds: float = 0.5,
     ) -> None:
         self.host = host.rstrip("/")
         self.chain_id = chain_id
         self._timeout = request_timeout_seconds
+        self._max_retries = max(0, max_retries)
+        self._retry_backoff_seconds = retry_backoff_seconds
+        api_key, api_secret, api_passphrase = _resolve_credentials(
+            api_key=api_key,
+            api_secret=api_secret,
+            api_passphrase=api_passphrase,
+        )
         self._private_key = private_key
         self._api_key = api_key
         self._api_secret = api_secret
         self._api_passphrase = api_passphrase
+        self._rate_limiter = AsyncRateLimiter(
+            max_requests=max(rate_limit_per_minute, 1),
+            per_seconds=60.0,
+        )
 
         creds = self._build_api_creds()
         self._client = ClobClient(
@@ -108,6 +143,10 @@ class PolymarketClient:
             request_timeout_seconds=cfg.polymarket_request_timeout_seconds,
             use_server_time=cfg.polymarket_use_server_time,
             retry_on_error=cfg.polymarket_retry_on_error,
+            rate_limit_per_minute=cfg.polymarket_rate_limit_per_minute,
+            rate_limit_burst=cfg.polymarket_rate_limit_burst,
+            max_retries=cfg.polymarket_max_retries,
+            retry_backoff_seconds=cfg.polymarket_retry_backoff_seconds,
         )
 
     @property
@@ -238,40 +277,71 @@ class PolymarketClient:
         return await self._run(self._client.get_price, token_id, side)
 
     async def _run(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(fn, *args, **kwargs),
-                timeout=self._timeout,
+        last_error: Exception | None = None
+
+        for attempt in range(self._max_retries + 1):
+            await self._rate_limiter.acquire()
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(fn, *args, **kwargs),
+                    timeout=self._timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise PolymarketTimeoutError(
+                    f"Polymarket request timed out after {self._timeout}s."
+                ) from exc
+            except PolyApiException as exc:
+                last_error = exc
+                if exc.status_code == 429 and attempt < self._max_retries:
+                    backoff = self._retry_backoff_seconds * (2**attempt)
+                    logger.warning(
+                        "Polymarket rate limited (429); retrying in %.2fs (attempt %s/%s)",
+                        backoff,
+                        attempt + 1,
+                        self._max_retries,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                if exc.status_code == 429:
+                    raise PolymarketRateLimitError(
+                        "Polymarket CLOB rate limit exceeded.",
+                        status_code=exc.status_code,
+                        error_payload=exc.error_msg,
+                        cause=exc,
+                    ) from exc
+                raise PolymarketApiError(
+                    str(exc.error_msg),
+                    status_code=exc.status_code,
+                    error_payload=exc.error_msg,
+                    cause=exc,
+                ) from exc
+            except PolyException as exc:
+                message = getattr(exc, "msg", None) or str(exc)
+                if message in {
+                    "A private key is needed to interact with this endpoint!",
+                    "API Credentials are needed to interact with this endpoint!",
+                }:
+                    raise PolymarketAuthError(message, cause=exc) from exc
+                raise PolymarketError(message, cause=exc) from exc
+            except httpx.HTTPError as exc:
+                raise PolymarketApiError(
+                    "HTTP error while calling Polymarket.",
+                    cause=exc,
+                ) from exc
+            except Exception as exc:
+                raise PolymarketError(
+                    "Unexpected error while calling Polymarket.",
+                    cause=exc,
+                ) from exc
+
+        if last_error is not None:
+            raise PolymarketRateLimitError(
+                "Polymarket CLOB rate limit exceeded after retries.",
+                status_code=429,
+                error_payload=getattr(last_error, "error_msg", None),
+                cause=last_error,
             )
-        except asyncio.TimeoutError as exc:
-            raise PolymarketTimeoutError(
-                f"Polymarket request timed out after {self._timeout}s."
-            ) from exc
-        except PolyApiException as exc:
-            raise PolymarketApiError(
-                str(exc.error_msg),
-                status_code=exc.status_code,
-                error_payload=exc.error_msg,
-                cause=exc,
-            ) from exc
-        except PolyException as exc:
-            message = getattr(exc, "msg", None) or str(exc)
-            if message in {
-                "A private key is needed to interact with this endpoint!",
-                "API Credentials are needed to interact with this endpoint!",
-            }:
-                raise PolymarketAuthError(message, cause=exc) from exc
-            raise PolymarketError(message, cause=exc) from exc
-        except httpx.HTTPError as exc:
-            raise PolymarketApiError(
-                "HTTP error while calling Polymarket.",
-                cause=exc,
-            ) from exc
-        except Exception as exc:
-            raise PolymarketError(
-                "Unexpected error while calling Polymarket.",
-                cause=exc,
-            ) from exc
+        raise PolymarketError("Polymarket request failed after retries.")
 
 
 __all__ = [

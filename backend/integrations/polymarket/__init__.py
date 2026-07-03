@@ -14,6 +14,7 @@ from .exceptions import (
     PolymarketApiError,
     PolymarketAuthError,
     PolymarketError,
+    PolymarketRateLimitError,
     PolymarketTimeoutError,
 )
 from .polymarket_client import (
@@ -42,6 +43,7 @@ __all__ = [
     "PolymarketAuthError",
     "PolymarketClient",
     "PolymarketError",
+    "PolymarketRateLimitError",
     "PolymarketService",
     "PolymarketTimeoutError",
     "get_polymarket_service",

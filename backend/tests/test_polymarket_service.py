@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from integrations.polymarket.exceptions import PolymarketApiError
 from integrations.polymarket.polymarket_service import (
     PolymarketService,
     normalize_polymarket_market,
@@ -175,3 +176,82 @@ async def test_invalidate_cache_clears_local_entries(service: PolymarketService)
     await service.invalidate_cache()
 
     assert service._local_cache == {}
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_noop_when_api_creds_present(service: PolymarketService) -> None:
+    service._client.is_authenticated = True  # type: ignore[attr-defined]
+    service._client.authenticate = AsyncMock()  # type: ignore[attr-defined]
+
+    await service.ensure_authenticated()
+
+    service._client.authenticate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_noop_without_wallet(service: PolymarketService) -> None:
+    service._client.is_authenticated = False  # type: ignore[attr-defined]
+    service._client.has_wallet = False  # type: ignore[attr-defined]
+    service._client.authenticate = AsyncMock()  # type: ignore[attr-defined]
+
+    await service.ensure_authenticated()
+
+    service._client.authenticate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_derives_credentials(service: PolymarketService) -> None:
+    service._client.is_authenticated = False  # type: ignore[attr-defined]
+    service._client.has_wallet = True  # type: ignore[attr-defined]
+    service._client.authenticate = AsyncMock()  # type: ignore[attr-defined]
+
+    await service.ensure_authenticated()
+
+    service._client.authenticate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_integration_status_reports_healthy(service: PolymarketService) -> None:
+    from integrations.polymarket.polymarket_client import MarketsPage
+
+    service._client.host = "https://clob.test"  # type: ignore[attr-defined]
+    service._client.chain_id = 137  # type: ignore[attr-defined]
+    service._client.auth_level = 0  # type: ignore[attr-defined]
+    service._client.has_wallet = False  # type: ignore[attr-defined]
+    service._client.is_authenticated = False  # type: ignore[attr-defined]
+    service._client.can_trade = False  # type: ignore[attr-defined]
+    service._client.get_markets = AsyncMock(  # type: ignore[attr-defined]
+        return_value=MarketsPage(data=[{"condition_id": "1"}], next_cursor="LTE=", limit=1, count=1)
+    )
+    service._cache_get = AsyncMock(return_value=[{"id": "poly-1"}])  # type: ignore[method-assign]
+    service._get_redis = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    status = await service.get_integration_status()
+
+    assert status["provider"] == "polymarket"
+    assert status["healthy"] is True
+    assert status["clob"] == "connected"
+    assert status["marketSampleSize"] == 1
+    assert status["cachedMarketCount"] == 1
+    assert status["latencyMs"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_integration_status_reports_clob_error(service: PolymarketService) -> None:
+    service._client.host = "https://clob.test"  # type: ignore[attr-defined]
+    service._client.chain_id = 137  # type: ignore[attr-defined]
+    service._client.auth_level = 0  # type: ignore[attr-defined]
+    service._client.has_wallet = False  # type: ignore[attr-defined]
+    service._client.is_authenticated = False  # type: ignore[attr-defined]
+    service._client.can_trade = False  # type: ignore[attr-defined]
+    service._client.get_markets = AsyncMock(  # type: ignore[attr-defined]
+        side_effect=PolymarketApiError("upstream failure", status_code=503)
+    )
+    service._cache_get = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._get_redis = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    status = await service.get_integration_status()
+
+    assert status["healthy"] is False
+    assert status["clob"] == "error"
+    assert "upstream failure" in str(status["error"])
