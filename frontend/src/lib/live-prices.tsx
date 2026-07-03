@@ -33,7 +33,7 @@ interface LivePricesContextValue {
 
 const LivePricesContext = createContext<LivePricesContextValue | null>(null);
 
-const SIMULATOR_INTERVAL_MS = 2_500;
+const SIMULATOR_INTERVAL_MS = 1_800;
 const clamp = (p: number) => Math.min(0.97, Math.max(0.03, p));
 
 export function LivePricesProvider({

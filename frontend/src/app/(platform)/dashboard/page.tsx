@@ -23,6 +23,7 @@ import { MoversList } from "@/components/dashboard/movers-list";
 import { PortfolioCard } from "@/components/dashboard/portfolio-card";
 import { PositionsTable } from "@/components/dashboard/positions-table";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
+import { FeedStatusDot } from "@/components/markets/live-price";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -35,6 +36,9 @@ export default async function DashboardPage() {
   const movers = listMarkets({ sort: "movers" }).slice(0, 5);
 
   const totalPnlPct = (account.totalPnl / account.startingBalance) * 100;
+  const profitTargetUsd =
+    account.startingBalance * (1 + account.profitTargetPct / 100);
+
   const stats: Stat[] = [
     {
       label: "Account equity",
@@ -67,14 +71,19 @@ export default async function DashboardPage() {
       {/* Page header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+            <span className="hidden sm:inline-flex">
+              <FeedStatusDot />
+            </span>
+          </div>
           <p className="mt-0.5 text-sm text-muted">
             {tenant.name} · {account.label}
           </p>
         </div>
         <Link
           href="/markets"
-          className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover"
+          className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground shadow-[0_0_20px_-4px_var(--tenant-accent)] transition-all hover:bg-accent-hover active:scale-[0.98]"
         >
           Trade markets
         </Link>
@@ -82,9 +91,31 @@ export default async function DashboardPage() {
 
       <StatCards stats={stats} />
 
-      {/* Main grid: content column + portfolio rail */}
+      {/* Main grid: rail first on mobile for challenge visibility */}
       <div className="grid gap-4 xl:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
+        <div className="order-1 flex min-w-0 flex-col gap-4 xl:order-2">
+          <ChallengePanel account={account} />
+          <PortfolioCard summary={summary} openPositions={positions.length} />
+          <Card>
+            <CardHeader
+              title="Top movers"
+              subtitle="Live · biggest 24h shifts"
+              action={
+                <Link
+                  href="/markets"
+                  className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
+                >
+                  All markets
+                </Link>
+              }
+            />
+            <CardBody>
+              <MoversList markets={movers} />
+            </CardBody>
+          </Card>
+        </div>
+
+        <div className="order-2 flex min-w-0 flex-col gap-4 xl:order-1 xl:col-span-2">
           <Card>
             <CardHeader
               title="Equity curve"
@@ -96,7 +127,13 @@ export default async function DashboardPage() {
               }
             />
             <CardBody>
-              <EquityChart data={account.equityCurve} baseline={account.startingBalance} />
+              <EquityChart
+                data={account.equityCurve}
+                baseline={account.startingBalance}
+                profitTarget={profitTargetUsd}
+                currentEquity={account.equity}
+                totalPnl={account.totalPnl}
+              />
             </CardBody>
           </Card>
 
@@ -119,29 +156,6 @@ export default async function DashboardPage() {
           </Card>
 
           <JournalCard entries={journal} />
-        </div>
-
-        {/* Rail */}
-        <div className="flex min-w-0 flex-col gap-4">
-          <ChallengePanel account={account} />
-          <PortfolioCard summary={summary} openPositions={positions.length} />
-          <Card>
-            <CardHeader
-              title="Top movers"
-              subtitle="Biggest 24h probability shifts"
-              action={
-                <Link
-                  href="/markets"
-                  className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
-                >
-                  All markets
-                </Link>
-              }
-            />
-            <CardBody>
-              <MoversList markets={movers} />
-            </CardBody>
-          </Card>
         </div>
       </div>
     </div>

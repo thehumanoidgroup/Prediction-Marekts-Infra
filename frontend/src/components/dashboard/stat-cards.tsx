@@ -12,12 +12,14 @@ export interface Stat {
 
 export function StatCards({ stats }: { stats: Stat[] }) {
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
       {stats.map((stat) => (
-        <Card key={stat.label}>
-          <CardBody className="pt-4">
-            <p className="text-xs font-medium text-muted">{stat.label}</p>
-            <p className="tabular mt-1.5 text-xl font-semibold tracking-tight sm:text-2xl">
+        <Card key={stat.label} className="overflow-hidden">
+          <CardBody className="relative pt-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+              {stat.label}
+            </p>
+            <p className="tabular mt-1.5 text-xl font-bold tracking-tight sm:text-2xl">
               {stat.value}
             </p>
             {stat.sub ? (

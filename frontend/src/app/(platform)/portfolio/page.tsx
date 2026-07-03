@@ -62,7 +62,12 @@ export default async function PortfolioPage() {
         <Card className="xl:col-span-2">
           <CardHeader title="Equity curve" subtitle="Last 30 days" />
           <CardBody>
-            <EquityChart data={account.equityCurve} baseline={account.startingBalance} />
+            <EquityChart
+              data={account.equityCurve}
+              baseline={account.startingBalance}
+              currentEquity={account.equity}
+              totalPnl={account.totalPnl}
+            />
           </CardBody>
         </Card>
         <Card>

@@ -114,3 +114,47 @@ body {
 .animate-flash-down {
   animation: pp-flash-down 1s ease-out;
 }
+
+/* Skeleton shimmer for loading placeholders. */
+@keyframes pp-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-3) 0%,
+    var(--color-edge-strong) 50%,
+    var(--color-surface-3) 100%
+  );
+  background-size: 200% 100%;
+  animation: pp-shimmer 1.6s ease-in-out infinite;
+}
+
+/* Subtle glow pulse on live price containers. */
+@keyframes pp-live-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 12px -2px color-mix(in srgb, var(--tenant-accent) 35%, transparent);
+  }
+}
+.animate-live-glow {
+  animation: pp-live-glow 2.5s ease-in-out infinite;
+}
+
+/* Spinner for pending actions. */
+@keyframes pp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: pp-spin 0.7s linear infinite;
+}
