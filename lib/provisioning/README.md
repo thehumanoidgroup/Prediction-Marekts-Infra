@@ -81,6 +81,22 @@ Set `sendEmails: false` on `provisionNewAccount()` or `send_emails: false` on we
 payloads to skip delivery. API responses omit raw `credentials` when the trader email was sent
 successfully.
 
+## Prop firm default settings (`PropFirmSettings`)
+
+Per-firm provisioning defaults live in the `prop_firm_settings` table (1:1 with `Tenant`):
+
+| Field | Purpose |
+| --- | --- |
+| `allowedModelTypes` | Model types the firm sells (`1step`, `2step`, …) |
+| `allowedAccountSizes` | Account size tiers available at checkout |
+| `modelDefaults` | Default challenge rules per model type |
+| `allowedOverrideFields` | `custom_rules` keys purchasers may override |
+| `defaultCustomRules` | Firm-wide JSON merged into every account |
+
+Resolution order at provisioning: platform preset → `Tenant.program` → `PropFirmSettings.modelDefaults` → filtered purchase `custom_rules`.
+
+Configure from **Prop Firm Admin → Provisioning** (`/admin/provisioning`) or `PATCH /api/admin/provisioning-settings`.
+
 ## API routes
 
 | Route | Method | Auth | Purpose |

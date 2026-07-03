@@ -74,6 +74,7 @@ model Tenant {
   users            User[]
   propFirmAccounts PropFirmAccount[]
   apiKeys          PropFirmApiKey[]
+  settings         PropFirmSettings?
 
   @@map("tenants")
 }
@@ -93,6 +94,25 @@ model PropFirmApiKey {
 
   @@index([tenantId])
   @@map("prop_firm_api_keys")
+}
+
+/// Per-firm provisioning defaults: model rules, allowed sizes, override policy.
+model PropFirmSettings {
+  id                    String              @id @default(uuid())
+  tenantId              String              @unique @map("tenant_id")
+  tenant                Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  allowedModelTypes     PropFirmModelType[] @default([one_step, two_step, three_step, instant]) @map("allowed_model_types")
+  allowedAccountSizes   AccountSize[]       @default([size_10k, size_25k, size_50k, size_100k]) @map("allowed_account_sizes")
+  /// Per-model default challenge rules (API keys: 1step, 2step, …).
+  modelDefaults         Json                @default("{}") @map("model_defaults")
+  /// Custom rule field names purchasers may override at sale time.
+  allowedOverrideFields Json                @default("[]") @map("allowed_override_fields")
+  /// Firm-wide custom JSON merged into every new account.
+  defaultCustomRules    Json                @default("{}") @map("default_custom_rules")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@map("prop_firm_settings")
 }
 
 model User {

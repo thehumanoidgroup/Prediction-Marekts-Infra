@@ -6,6 +6,7 @@
  */
 
 import type { TenantProgram } from "@/lib/tenants";
+import type { ModelTypeDefaults } from "@/types/firm-settings";
 import type {
   AccountSize,
   ChallengeConfigInput,
@@ -18,6 +19,10 @@ export interface DefaultRulesContext {
   accountSize: AccountSize;
   /** Optional firm-level program defaults from Tenant.program JSON. */
   firmProgram?: Partial<TenantProgram>;
+  /** Per-model defaults from PropFirmSettings. */
+  firmModelDefaults?: ModelTypeDefaults;
+  /** Firm-wide custom JSON defaults from PropFirmSettings. */
+  firmDefaultCustomRules?: Record<string, unknown>;
   /** Prop firm JSON overrides (webhook payload or admin form). */
   customRules?: Record<string, unknown>;
 }
@@ -33,7 +38,7 @@ interface ModelTypePreset {
   consistencyScore?: number;
 }
 
-const MODEL_PRESETS: Record<PropFirmModelType, ModelTypePreset> = {
+export const MODEL_PRESETS: Record<PropFirmModelType, ModelTypePreset> = {
   "1step": {
     profitTarget: 10,
     dailyDrawdown: 5,
@@ -93,16 +98,37 @@ function str(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function modelDefaultsToFlatCustom(defaults: ModelTypeDefaults): Record<string, unknown> {
+  const rules: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(defaults)) {
+    if (value !== undefined) rules[key] = value;
+  }
+  return rules;
+}
+
 /**
  * Build the baseline ChallengeConfig for a sold account before firm overrides.
  */
 export function resolveDefaultChallengeConfig(ctx: DefaultRulesContext): ChallengeConfigInput {
   const preset = MODEL_PRESETS[ctx.modelType];
   const firm = ctx.firmProgram ?? {};
-  const custom = ctx.customRules ?? {};
+  const modelDefaults = ctx.firmModelDefaults ?? {};
+  const firmCustom = ctx.firmDefaultCustomRules ?? {};
+  const purchase = ctx.customRules ?? {};
+
+  // Precedence: purchase overrides → firm default custom → per-model defaults → program → platform preset
+  const custom = {
+    ...firmCustom,
+    ...modelDefaultsToFlatCustom(modelDefaults),
+    ...purchase,
+  };
+
   const balance = defaultVirtualBalance(ctx.accountSize);
 
-  const profitTarget = num(custom.profitTarget ?? firm.profitTargetPct, preset.profitTarget);
+  const profitTarget = num(
+    custom.profitTarget ?? firm.profitTargetPct,
+    preset.profitTarget,
+  );
   const dailyDrawdown = num(
     custom.dailyDrawdown ?? custom.maxDailyLossPct ?? firm.maxDailyLossPct,
     preset.dailyDrawdown,

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { createPropFirmApiKey } from "@/lib/provisioning/api-keys";
+import { ensureFirmSettingsSeeded } from "@/lib/provisioning/firm-settings";
 
 const DEMO_PASSWORD = "demo-password-123";
 
@@ -107,6 +108,7 @@ export async function ensureSeeded(): Promise<void> {
   if (seeded) {
     if (process.env.DATABASE_URL) {
       await ensureWebhookApiKeys();
+      await ensureFirmSettingsSeeded();
     }
     return;
   }
@@ -117,6 +119,7 @@ export async function ensureSeeded(): Promise<void> {
     if (count > 0) {
       seeded = true;
       await ensureWebhookApiKeys();
+      await ensureFirmSettingsSeeded();
       return;
     }
 
@@ -167,6 +170,7 @@ export async function ensureSeeded(): Promise<void> {
 
     seeded = true;
     await ensureWebhookApiKeys();
+    await ensureFirmSettingsSeeded();
   } catch (error) {
     console.error("[seed] failed:", error);
   }

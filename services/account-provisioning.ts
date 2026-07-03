@@ -36,6 +36,12 @@ import {
   fromApiModelType,
   serializePropFirmAccount,
 } from "@/lib/provisioning/serialize";
+import {
+  filterAllowedPurchaseOverrides,
+  getModelDefaultsForType,
+  getOrCreateFirmSettings,
+  validateProvisioningAgainstSettings,
+} from "@/lib/provisioning/firm-settings";
 import { tenantRowToConfig } from "@/lib/tenant-db";
 import { provisionNewAccountSchema } from "@/lib/schemas/provisioning";
 import { sendProvisioningEmails, type ProvisioningEmailResult } from "@/services/email";
@@ -94,12 +100,21 @@ export function resolveChallengeConfigForAccount(input: {
   customRules?: Record<string, unknown>;
   challengeConfigOverrides?: Partial<ChallengeConfigInput>;
   firmProgram?: Partial<import("@/lib/tenants").TenantProgram>;
+  firmSettings?: import("@/types/firm-settings").PropFirmSettingsRecord;
 }): ChallengeConfigInput {
+  const filteredCustomRules = input.firmSettings
+    ? filterAllowedPurchaseOverrides(input.firmSettings, input.customRules)
+    : input.customRules;
+
   const base = resolveDefaultChallengeConfig({
     modelType: input.modelType,
     accountSize: input.accountSize,
     firmProgram: input.firmProgram,
-    customRules: input.customRules,
+    firmModelDefaults: input.firmSettings
+      ? getModelDefaultsForType(input.firmSettings, input.modelType)
+      : undefined,
+    firmDefaultCustomRules: input.firmSettings?.defaultCustomRules,
+    customRules: filteredCustomRules,
   });
   return mergeChallengeConfig(base, input.challengeConfigOverrides);
 }
@@ -181,6 +196,10 @@ export async function provisionNewAccount(
   }
 
   const firmConfig = tenantRowToConfig(firm);
+  const firmSettings = await getOrCreateFirmSettings(data.propFirmId, firmConfig.program);
+
+  validateProvisioningAgainstSettings(firmSettings, data.modelType, data.accountSize);
+
   const challengeConfig = resolveChallengeConfigForAccount({
     propFirmId: data.propFirmId,
     modelType: data.modelType,
@@ -188,6 +207,7 @@ export async function provisionNewAccount(
     customRules: data.customRules,
     challengeConfigOverrides: data.challengeConfigOverrides,
     firmProgram: firmConfig.program,
+    firmSettings,
   });
 
   const virtualBalance = defaultVirtualBalance(data.accountSize);
