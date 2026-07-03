@@ -40,6 +40,19 @@ enum PropFirmAccountStatus {
   expired
 }
 
+/// Background provisioning job state (database queue).
+enum ProvisioningJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum ProvisioningJobSource {
+  webhook
+  manual
+}
+
 /// Whether max bet size is expressed as a percentage or fixed USD amount.
 enum MaxBetSizeMode {
   percent
@@ -155,4 +168,38 @@ model TraderDemoAccount {
 
   @@index([challengeConfigId])
   @@map("trader_demo_accounts")
+}
+
+/// Durable Super Admin activity feed (provisioning, onboarding, etc.).
+model PlatformActivityLog {
+  id         String   @id @default(uuid())
+  type       String
+  tenantId   String?  @map("tenant_id")
+  tenantName String?  @map("tenant_name")
+  message    String   @db.Text
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)])
+  @@map("platform_activity_logs")
+}
+
+/// Async provisioning job queue (database-backed; optional Redis trigger via env).
+model ProvisioningJob {
+  id                String                @id @default(uuid())
+  status            ProvisioningJobStatus @default(pending)
+  source            ProvisioningJobSource
+  payload           Json
+  propFirmAccountId String?               @map("prop_firm_account_id")
+  result            Json?
+  error             String?               @db.Text
+  attempts          Int                   @default(0)
+  maxAttempts       Int                   @default(3) @map("max_attempts")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  startedAt         DateTime?             @map("started_at")
+  completedAt       DateTime?             @map("completed_at")
+
+  @@index([status, createdAt])
+  @@map("provisioning_jobs")
 }

@@ -3,30 +3,21 @@
  *
  * Equivalent of the requested `backend/services/account_provisioning.py` for the
  * Next.js / Prisma stack. Call from webhooks, Super Admin API routes, or
- * internal jobs to fully automate sold-account setup.
- *
- * @example Webhook handler
- * ```ts
- * import { provisionNewAccount } from "@/services/account-provisioning";
- *
- * const result = await provisionNewAccount({
- *   propFirmId: firm.id,
- *   traderEmail: payload.email,
- *   modelType: "2step",
- *   accountSize: "100K",
- *   customRules: payload.rules,
- * });
- * // Deliver result.credentials once via email — never log the password.
- * ```
+ * background jobs to fully automate sold-account setup.
  */
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   buildRiskProfile,
+  listRiskProfiles,
   registerRiskProfile,
   type RiskProfile,
 } from "@/lib/engine/risk";
+import {
+  logAccountProvisioned,
+  logAccountProvisioningFailed,
+} from "@/lib/platform/activity";
 import { ensureSeeded } from "@/lib/seed";
 import { encryptLoginCredentials } from "@/lib/provisioning/crypto";
 import {
@@ -73,10 +64,15 @@ export interface ProvisionNewAccountInput {
   challengeConfigOverrides?: Partial<ChallengeConfigInput>;
   /** How login credentials are generated. Default: `password`. */
   loginMode?: LoginDeliveryMode;
-  /** Mark account activated and set credentialsSentAt after provisioning. */
+  /** After provisioning, set status to `activated` instead of `provisioned`. */
   activateImmediately?: boolean;
   /** Send trader + prop firm emails after provisioning. Default: true. */
   sendEmails?: boolean;
+  /** Entry point for Super Admin activity metadata. */
+  source?: "webhook" | "manual" | "job";
+  provisionedBy?: string;
+  /** Skip duplicate activity log when async queue already logged enqueue. */
+  skipActivityLog?: boolean;
 }
 
 export interface ProvisionNewAccountResult {
@@ -108,19 +104,63 @@ export function resolveChallengeConfigForAccount(input: {
   return mergeChallengeConfig(base, input.challengeConfigOverrides);
 }
 
+/** Hydrate in-memory risk profiles after cold start (idempotent). */
+export async function ensureRiskEngineHydrated(): Promise<void> {
+  if (!process.env.DATABASE_URL || listRiskProfiles().length > 0) return;
+
+  const rows = await prisma.propFirmAccount.findMany({
+    where: { status: { in: ["provisioned", "activated"] } },
+    include: { challengeConfig: true, traderDemoAccount: true },
+  });
+
+  for (const row of rows) {
+    if (!row.challengeConfig || !row.traderDemoAccount) continue;
+    const account = serializePropFirmAccount(row);
+    const challengeConfig: ChallengeConfigInput = {
+      profitTarget: Number(row.challengeConfig.profitTarget),
+      dailyDrawdown: Number(row.challengeConfig.dailyDrawdown),
+      maxDrawdown: Number(row.challengeConfig.maxDrawdown),
+      maxBetSizeValue: Number(row.challengeConfig.maxBetSizeValue),
+      maxBetSizeMode: row.challengeConfig.maxBetSizeMode,
+      consistencyScore:
+        row.challengeConfig.consistencyScore === null
+          ? null
+          : Number(row.challengeConfig.consistencyScore),
+      otherCustomRules: (row.challengeConfig.otherCustomRules ?? {}) as Record<
+        string,
+        unknown
+      >,
+    };
+
+    registerRiskProfile(
+      buildRiskProfile({
+        propFirmAccountId: row.id,
+        propFirmId: row.propFirmId,
+        traderEmail: row.traderEmail,
+        modelType: account.modelType,
+        accountSize: account.accountSize,
+        virtualBalance: Number(row.traderDemoAccount.virtualBalance),
+        challengeConfig,
+      }),
+    );
+  }
+}
+
 /**
  * Full automated provisioning flow:
  *
  * 1. Resolve challenge rules (model + size + firm + custom JSON)
- * 2. Create `PropFirmAccount` + `ChallengeConfig`
- * 3. Generate secure credentials (password or magic link)
- * 4. Create `TraderDemoAccount` with virtual balance
- * 5. Register rules on the in-process Risk Engine
+ * 2. Create `PropFirmAccount` (pending) + `ChallengeConfig` + encrypted credentials
+ * 3. Register rules on the in-process Risk Engine
+ * 4. Send trader + prop firm emails
+ * 5. Update status to `provisioned` (or `activated` when requested)
+ * 6. Log event in Super Admin activity feed
  */
 export async function provisionNewAccount(
   input: ProvisionNewAccountInput,
 ): Promise<ProvisionNewAccountResult> {
   await ensureSeeded();
+  await ensureRiskEngineHydrated();
 
   const data = provisionNewAccountSchema.parse({
     propFirmId: input.propFirmId,
@@ -153,8 +193,9 @@ export async function provisionNewAccount(
   const virtualBalance = defaultVirtualBalance(data.accountSize);
   const traderEmail = data.traderEmail.toLowerCase();
   const now = new Date();
-  const status = data.activateImmediately ? "activated" : "provisioned";
+  const source = input.source ?? "job";
 
+  // Step 1–2: Create account shell, challenge config, and encrypted credentials.
   const row = await prisma.$transaction(async (tx) => {
     const account = await tx.propFirmAccount.create({
       data: {
@@ -163,8 +204,7 @@ export async function provisionNewAccount(
         modelType: fromApiModelType(data.modelType),
         accountSize: fromApiAccountSize(data.accountSize),
         purchasedAt: data.purchasedAt ?? now,
-        status,
-        credentialsSentAt: data.activateImmediately ? now : null,
+        status: "pending",
         challengeConfig: {
           create: {
             profitTarget: challengeConfig.profitTarget,
@@ -211,8 +251,9 @@ export async function provisionNewAccount(
     return { row: full, generated };
   });
 
-  const accountRecord = serializePropFirmAccount(row.row);
+  let accountRecord = serializePropFirmAccount(row.row);
 
+  // Step 3: Apply challenge rules to the Risk Engine.
   const riskProfile = registerRiskProfile(
     buildRiskProfile({
       propFirmAccountId: row.row.id,
@@ -225,32 +266,60 @@ export async function provisionNewAccount(
     }),
   );
 
+  // Step 4: Send provisioning emails.
   let emails: ProvisioningEmailResult | undefined;
   const shouldSendEmails = data.sendEmails !== false;
 
   if (shouldSendEmails) {
-    emails = await sendProvisioningEmails({
-      account: accountRecord,
-      credentials: row.generated.delivery,
-      firmName: firmConfig.name,
-      propFirmId: data.propFirmId,
-      virtualBalance,
-      challengeConfig,
-    });
-
-    if (emails.trader.sent) {
-      await prisma.propFirmAccount.update({
-        where: { id: row.row.id },
-        data: {
-          credentialsSentAt: new Date(),
-          status: accountRecord.status === "provisioned" ? "activated" : undefined,
-        },
+    try {
+      emails = await sendProvisioningEmails({
+        account: accountRecord,
+        credentials: row.generated.delivery,
+        firmName: firmConfig.name,
+        propFirmId: data.propFirmId,
+        virtualBalance,
+        challengeConfig,
       });
-      accountRecord.credentialsSentAt = new Date().toISOString();
-      if (accountRecord.status === "provisioned") {
-        accountRecord.status = "activated";
-      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Email delivery failed";
+      await logAccountProvisioningFailed({
+        tenantId: data.propFirmId,
+        tenantName: firmConfig.name,
+        traderEmail,
+        error: message,
+        source,
+      });
+      throw error;
     }
+  }
+
+  // Step 5: Finalize account status.
+  const finalStatus = data.activateImmediately ? "activated" : "provisioned";
+  const credentialsSentAt = emails?.trader.sent ? new Date() : null;
+
+  const updated = await prisma.propFirmAccount.update({
+    where: { id: row.row.id },
+    data: {
+      status: finalStatus,
+      credentialsSentAt,
+    },
+    include: accountInclude,
+  });
+
+  accountRecord = serializePropFirmAccount(updated);
+
+  // Step 6: Super Admin activity log.
+  if (!input.skipActivityLog) {
+    await logAccountProvisioned({
+      tenantId: data.propFirmId,
+      tenantName: firmConfig.name,
+      traderEmail,
+      accountSize: data.accountSize,
+      modelType: data.modelType,
+      accountId: accountRecord.id,
+      source,
+      async: false,
+    });
   }
 
   return {

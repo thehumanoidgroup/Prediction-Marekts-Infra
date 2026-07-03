@@ -15,12 +15,14 @@ Automated provisioning models and services for sold prop firm evaluation account
 
 ## `provisionNewAccount(data)`
 
-Full automation flow in one call:
+End-to-end automation in one call (sync) or via the background queue (async):
 
 1. Resolves `ChallengeConfig` from `modelType` + `accountSize` + firm program + `customRules` JSON
-2. Creates `PropFirmAccount` + `ChallengeConfig` + `TraderDemoAccount`
-3. Generates secure login credentials (`password` or `magic_link` mode)
-4. Registers rules on the in-process **Risk Engine** (`lib/engine/risk.ts`)
+2. Creates `PropFirmAccount` (pending) + `ChallengeConfig` + `TraderDemoAccount` with encrypted credentials
+3. Registers rules on the in-process **Risk Engine** (`lib/engine/risk.ts`)
+4. Sends trader + prop firm emails (`services/email.ts`)
+5. Updates account status to **`provisioned`** (or `activated` when `activateImmediately: true`)
+6. Logs the event in the Super Admin activity feed (`lib/platform/activity.ts`)
 
 ```typescript
 import { provisionNewAccount } from "@/services/account-provisioning";
@@ -36,12 +38,21 @@ const result = await provisionNewAccount({
     maxExposurePerMarket: 8000,
   },
   loginMode: "password", // or "magic_link"
-  activateImmediately: true,
 });
 
-// Deliver once via email/webhook — do not log result.credentials.password
-// Emails are sent automatically when provisioning completes (see services/email.ts).
+// Credentials are emailed automatically — do not log result.credentials.password
 ```
+
+### Async queue (high volume)
+
+Set `PROVISIONING_ASYNC=true` or pass `"async": true` on webhook/manual payloads to enqueue
+instead of blocking the HTTP request. Jobs are stored in `provisioning_jobs` and processed by
+`POST /api/internal/provisioning/process` (triggered automatically after enqueue).
+
+Poll job status: `GET /api/provisioning/jobs/{id}` (Super Admin JWT).
+
+For Redis/Celery-style external workers, poll `provisioning_jobs` where `status = pending`
+or call the internal worker route on a schedule.
 
 ### Helper methods
 
@@ -78,6 +89,8 @@ successfully.
 | `/api/provisioning/manual` | POST | Super Admin JWT | Manual account creation |
 | `/api/provisioning/accounts` | GET | Super Admin JWT | List sold accounts (filterable) |
 | `/api/provisioning/accounts/{id}` | GET | Super Admin JWT | Single account detail |
+| `/api/provisioning/jobs/{id}` | GET | Super Admin JWT | Async job status |
+| `/api/internal/provisioning/process` | POST | Worker secret | Background job processor |
 
 ### Webhook example
 
@@ -112,3 +125,6 @@ npx prisma generate
 - `EMAIL_FROM` — sender address (default: `PropPredict <onboarding@resend.dev>`)
 - `SUPPORT_EMAIL` — support contact shown in provisioning emails
 - `PROVISIONING_EMAILS_ENABLED` — set to `false` to disable all provisioning emails
+- `PROVISIONING_ASYNC` — enqueue provisioning instead of inline processing
+- `PROVISIONING_QUEUE` — set to `database` for async queue mode
+- `PROVISIONING_WORKER_SECRET` — Bearer token for the internal worker route

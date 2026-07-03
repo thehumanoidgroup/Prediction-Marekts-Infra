@@ -62,6 +62,7 @@ export const provisionNewAccountSchema = z.object({
   loginMode: z.enum(["password", "magic_link"]).default("password"),
   activateImmediately: z.boolean().default(false),
   sendEmails: z.boolean().default(true),
+  async: z.boolean().optional(),
 });
 
 /** Webhook payload (snake_case) from prop firm checkout systems. */
@@ -73,6 +74,9 @@ export const provisioningWebhookSchema = z
     account_size: accountSizeSchema,
     custom_rules: z.record(z.string(), z.unknown()).optional(),
     purchased_at: z.coerce.date().optional(),
+    async: z.boolean().optional(),
+    activate_immediately: z.boolean().optional(),
+    send_emails: z.boolean().optional(),
   })
   .transform((data) => ({
     propFirmId: data.prop_firm_id,
@@ -81,7 +85,9 @@ export const provisioningWebhookSchema = z
     accountSize: data.account_size,
     customRules: data.custom_rules,
     purchasedAt: data.purchased_at,
-    activateImmediately: true,
+    activateImmediately: data.activate_immediately ?? false,
+    sendEmails: data.send_emails,
+    async: data.async,
   }));
 
 /** Super Admin manual provisioning (camelCase or snake_case). */
@@ -105,6 +111,7 @@ export const provisioningManualSchema = z
     activate_immediately: z.boolean().optional(),
     sendEmails: z.boolean().optional(),
     send_emails: z.boolean().optional(),
+    async: z.boolean().optional(),
     purchasedAt: z.coerce.date().optional(),
     purchased_at: z.coerce.date().optional(),
   })
@@ -116,9 +123,10 @@ export const provisioningManualSchema = z
     customRules: data.customRules ?? data.custom_rules,
     challengeConfigOverrides: data.challengeConfigOverrides ?? data.challenge_config_overrides,
     loginMode: data.loginMode ?? data.login_mode ?? "password",
-    activateImmediately: data.activateImmediately ?? data.activate_immediately ?? true,
+    activateImmediately: data.activateImmediately ?? data.activate_immediately ?? false,
     purchasedAt: data.purchasedAt ?? data.purchased_at,
     sendEmails: data.sendEmails ?? data.send_emails,
+    async: data.async,
   }))
   .superRefine((data, ctx) => {
     const required: Array<keyof typeof data> = [

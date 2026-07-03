@@ -5,8 +5,8 @@ import {
   isAuthError,
   provisioningDbUnavailable,
 } from "@/lib/provisioning/route-auth";
+import { executeProvisioningRequest } from "@/lib/provisioning/execute";
 import { provisioningWebhookSchema } from "@/lib/schemas/provisioning";
-import { provisionNewAccount } from "@/services/account-provisioning";
 
 /**
  * POST /api/provisioning/webhook
@@ -15,7 +15,7 @@ import { provisionNewAccount } from "@/services/account-provisioning";
  * Secured with per-firm API key (`X-API-Key` or `Authorization: Bearer ppk_...`).
  *
  * Body (snake_case):
- * { prop_firm_id, trader_email, model_type, account_size, custom_rules? }
+ * { prop_firm_id, trader_email, model_type, account_size, custom_rules?, async? }
  */
 export async function POST(request: NextRequest) {
   if (!process.env.DATABASE_URL) return provisioningDbUnavailable();
@@ -41,21 +41,14 @@ export async function POST(request: NextRequest) {
   if (isAuthError(auth)) return auth;
 
   try {
-    const result = await provisionNewAccount({
-      ...parsed,
-      loginMode: "password",
-    });
-
-    return NextResponse.json(
+    const response = await executeProvisioningRequest(
       {
-        account: result.account,
-        credentialsFingerprint: result.credentialsFingerprint,
-        emails: result.emails,
-        // Credentials are emailed to the trader automatically when Resend is configured.
-        ...(result.emails?.trader.sent ? {} : { credentials: result.credentials }),
+        ...parsed,
+        loginMode: "password",
       },
-      { status: 201 },
+      "webhook",
     );
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Provisioning failed";
     const status = message.includes("not found") ? 404 : 422;

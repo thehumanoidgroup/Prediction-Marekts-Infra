@@ -16,7 +16,7 @@ export default async function PlatformOverviewPage() {
   const stats = getPlatformStats();
   const firms = listFirmOverviews();
   const analytics = getPlatformAnalytics();
-  const activity = getPlatformActivity();
+  const activity = await getPlatformActivity();
 
   const kpis: Stat[] = [
     {

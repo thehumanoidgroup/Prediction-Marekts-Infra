@@ -5,8 +5,8 @@ import {
   provisioningDbUnavailable,
   requireSuperAdmin,
 } from "@/lib/provisioning/route-auth";
+import { executeProvisioningRequest } from "@/lib/provisioning/execute";
 import { provisioningManualSchema } from "@/lib/schemas/provisioning";
-import { provisionNewAccount } from "@/services/account-provisioning";
 
 /**
  * POST /api/provisioning/manual
@@ -38,18 +38,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await provisionNewAccount(parsed);
-
-    return NextResponse.json(
+    const response = await executeProvisioningRequest(
       {
-        account: result.account,
-        riskProfile: result.riskProfile,
-        credentialsFingerprint: result.credentialsFingerprint,
-        emails: result.emails,
-        ...(result.emails?.trader.sent ? {} : { credentials: result.credentials }),
+        ...parsed,
         provisionedBy: admin.userId,
       },
-      { status: 201 },
+      "manual",
+    );
+
+    const payload = await response.json();
+    return NextResponse.json(
+      {
+        ...payload,
+        provisionedBy: admin.userId,
+      },
+      { status: response.status },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Provisioning failed";

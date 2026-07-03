@@ -222,7 +222,9 @@ export type PlatformActivityType =
   | "trader_failed"
   | "market_created"
   | "volume_milestone"
-  | "risk_alert";
+  | "risk_alert"
+  | "account_provisioned"
+  | "account_provisioning_failed";
 
 export interface PlatformActivity {
   id: string;
