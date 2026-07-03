@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     polymarket_request_timeout_seconds: float = 30.0
     polymarket_use_server_time: bool = False
     polymarket_retry_on_error: bool = False
+    polymarket_cache_ttl_seconds: float = 300.0
+    polymarket_list_cache_ttl_seconds: float = 600.0
+    polymarket_max_fetch_pages: int | None = 10
 
 
 @lru_cache

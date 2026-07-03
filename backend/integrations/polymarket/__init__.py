@@ -15,6 +15,11 @@ from .polymarket_client import (
     MarketsPage,
     PolymarketClient,
 )
+from .polymarket_service import (
+    PolymarketService,
+    get_polymarket_service,
+    normalize_polymarket_market,
+)
 
 __all__ = [
     "DEFAULT_CHAIN_ID",
@@ -27,5 +32,8 @@ __all__ = [
     "PolymarketAuthError",
     "PolymarketClient",
     "PolymarketError",
+    "PolymarketService",
     "PolymarketTimeoutError",
+    "get_polymarket_service",
+    "normalize_polymarket_market",
 ]
