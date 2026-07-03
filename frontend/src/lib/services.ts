@@ -1,24 +1,34 @@
 import {
+  createGlobalMarketTemplate,
   createMarketFromTemplate,
   getAdminTraders as storeAdminTraders,
   getLeaderboard,
+  getPlatformActivityFeed,
+  getPlatformAnalyticsSeries,
   getStore,
   getTenantOverrides,
   getTenantState,
+  listFirmOverviews as storeFirmOverviews,
+  listGlobalTemplates,
   patchTenantOverrides,
   type CreateMarketInput,
   type TenantOverrides,
 } from "@/lib/store";
-import { getTenant, type TenantConfig } from "@/lib/tenants";
+import { getTenant, listTenants, type TenantConfig } from "@/lib/tenants";
 import type {
   AdminTrader,
   ChallengeAccount,
+  FirmDetail,
+  FirmOverview,
   JournalEntry,
   LeaderboardEntry,
   Market,
   MarketCategory,
   Order,
   Outcome,
+  PlatformActivity,
+  PlatformAnalyticsPoint,
+  PlatformStats,
   PortfolioSummary,
   Position,
 } from "@/lib/types";
@@ -340,4 +350,89 @@ export function addJournalNote(tenantId: string, note: string, tags: string[] = 
   };
   state.journal.unshift(entry);
   return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Platform owner (SuperAdmin) services — cross-tenant aggregates and templates.
+// ---------------------------------------------------------------------------
+
+export function getPlatformStats(): PlatformStats {
+  const firms = storeFirmOverviews();
+  const traders = listTenants().flatMap((t) => storeAdminTraders(t.id));
+  const finished = traders.filter((t) => t.status !== "active");
+  const passed = traders.filter((t) => t.status === "passed");
+
+  return {
+    totalFirms: firms.length,
+    activeFirms: firms.filter((f) => f.isActive).length,
+    totalTraders: traders.length,
+    activeTraders: traders.filter((t) => t.status === "active").length,
+    volume24h: firms.reduce((sum, f) => sum + f.volume24h, 0),
+    totalVolume: firms.reduce((sum, f) => sum + f.totalVolume, 0),
+    revenue: firms.reduce((sum, f) => sum + f.revenue, 0),
+    revenue24h: firms.reduce((sum, f) => sum + Math.round(f.volume24h * 0.022), 0),
+    avgPassRate: finished.length ? (passed.length / finished.length) * 100 : 0,
+  };
+}
+
+export function listFirmOverviews(): FirmOverview[] {
+  return storeFirmOverviews().sort((a, b) => b.totalVolume - a.totalVolume);
+}
+
+export function getFirmDetail(tenantId: string): FirmDetail | null {
+  const tenant = listTenants().find((t) => t.id === tenantId);
+  if (!tenant) return null;
+
+  const overview = storeFirmOverviews().find((f) => f.id === tenantId);
+  if (!overview) return null;
+
+  const traders = storeAdminTraders(tenantId);
+  const finished = traders.filter((t) => t.status !== "active");
+  const passed = traders.filter((t) => t.status === "passed");
+
+  return {
+    ...overview,
+    tagline: getEffectiveTenant(tenantId).tagline,
+    atRiskTraders: traders.filter((t) => t.status === "active" && t.drawdownUsedPct >= 75).length,
+    failedTraders: traders.filter((t) => t.status === "failed").length,
+    avgWinRate: traders.length
+      ? traders.reduce((sum, t) => sum + t.winRate, 0) / traders.length
+      : 0,
+    totalEquity: traders.reduce((sum, t) => sum + t.equity, 0),
+    passRate: finished.length ? (passed.length / finished.length) * 100 : overview.passRate,
+    roster: [...traders].sort((a, b) => b.pnlPct - a.pnlPct),
+  };
+}
+
+export function getPlatformAnalytics(): PlatformAnalyticsPoint[] {
+  return getPlatformAnalyticsSeries();
+}
+
+export function getPlatformActivity(): PlatformActivity[] {
+  return getPlatformActivityFeed();
+}
+
+export function listGlobalMarketTemplates(): Market[] {
+  return listGlobalTemplates();
+}
+
+/** Creates a global market template available to all prop firms. */
+export function createGlobalMarket(input: CreateMarketInput): Market {
+  if (!input.question.trim() || input.question.trim().length < 10) {
+    throw new Error("Question must be at least 10 characters");
+  }
+  if (!MARKET_CATEGORIES.includes(input.category)) {
+    throw new Error(`Unknown category: ${input.category}`);
+  }
+  if (
+    !Number.isFinite(input.initialProbability) ||
+    input.initialProbability < 0.03 ||
+    input.initialProbability > 0.97
+  ) {
+    throw new Error("Initial probability must be between 3% and 97%");
+  }
+  if (!Number.isFinite(input.closesAt) || input.closesAt <= Date.now()) {
+    throw new Error("Close date must be in the future");
+  }
+  return createGlobalMarketTemplate(input);
 }

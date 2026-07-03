@@ -36,7 +36,13 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
     { href: "/admin/markets", label: "Market templates", icon: "markets" },
   ];
 
-  return [{ items: trader }, { label: "Firm admin", items: admin }];
+  const platform: NavItem[] = [
+    { href: "/platform", label: "Overview", icon: "globe", exact: true },
+    { href: "/platform/firms", label: "All firms", icon: "users" },
+    { href: "/platform/markets", label: "Global templates", icon: "markets" },
+  ];
+
+  return [{ items: trader }, { label: "Firm admin", items: admin }, { label: "Platform", items: platform }];
 }
 
 function Logo({ tenant }: { tenant: TenantConfig }) {

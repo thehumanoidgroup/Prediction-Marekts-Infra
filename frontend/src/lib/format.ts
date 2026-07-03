@@ -79,3 +79,16 @@ export function formatTimeUntil(timestamp: number): string {
   if (days < 30) return `${days}d`;
   return `${Math.floor(days / 30)}mo`;
 }
+
+/** Relative time for past events, e.g. "3h ago". */
+export function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  if (diff < 60_000) return "just now";
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}

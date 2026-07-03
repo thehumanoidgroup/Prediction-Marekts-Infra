@@ -3,16 +3,19 @@ import type {
   AdminTrader,
   ChallengeAccount,
   ChallengeObjective,
+  FirmOverview,
   JournalEntry,
   LeaderboardEntry,
   Market,
   MarketCategory,
   Order,
   Outcome,
+  PlatformActivity,
+  PlatformAnalyticsPoint,
   Position,
   PricePoint,
 } from "@/lib/types";
-import { getTenant, type TenantConfig } from "@/lib/tenants";
+import { getTenant, listTenants, type TenantConfig } from "@/lib/tenants";
 
 /**
  * In-memory data store seeded deterministically per process.
@@ -41,6 +44,9 @@ export interface TenantOverrides {
 
 interface Store {
   markets: Market[];
+  globalTemplates: Market[];
+  platformActivity: PlatformActivity[];
+  platformAnalytics: PlatformAnalyticsPoint[];
   tenants: Map<string, TenantState>;
   leaderboards: Map<string, LeaderboardEntry[]>;
   adminTraders: Map<string, AdminTrader[]>;
@@ -359,10 +365,192 @@ function generateAdminTraders(tenantId: string, now: number): AdminTrader[] {
   });
 }
 
+function generateGlobalTemplates(now: number): Market[] {
+  const seeds: Array<{ question: string; category: MarketCategory; basePrice: number }> = [
+    { question: "Will the Fed cut rates at the next FOMC meeting?", category: "economics", basePrice: 0.55 },
+    { question: "Will BTC reach a new ATH this quarter?", category: "crypto", basePrice: 0.48 },
+    { question: "Will the S&P 500 close green on Friday?", category: "indices", basePrice: 0.62 },
+    { question: "Will EUR/USD trade above 1.10 this month?", category: "forex", basePrice: 0.41 },
+    { question: "Will gold close above $3,200/oz this week?", category: "commodities", basePrice: 0.53 },
+  ];
+  return seeds.map((seed, index) => {
+    const rng = createRng(seedFromString(`global:${seed.question}`));
+    const history: PricePoint[] = Array.from({ length: 8 }, (_, i) => ({
+      t: now - (7 - i) * DAY,
+      p: seed.basePrice,
+    }));
+    return {
+      id: `mkt-${index + 1}-g`,
+      question: seed.question,
+      category: seed.category,
+      status: "open" as const,
+      yesPrice: seed.basePrice,
+      change24h: 0,
+      volume: 0,
+      volume24h: 0,
+      openInterest: 0,
+      traders: 0,
+      closesAt: now + 60 * DAY,
+      history,
+    };
+  });
+}
+
+function generatePlatformActivity(now: number, tenants: TenantConfig[]): PlatformActivity[] {
+  const rng = createRng(seedFromString("platform-activity"));
+  const items: Array<Omit<PlatformActivity, "id">> = [
+    {
+      type: "firm_onboarded",
+      tenantId: "nova",
+      tenantName: "Nova Markets",
+      message: "Nova Markets completed onboarding and went live",
+      ts: now - 18 * DAY,
+    },
+    {
+      type: "volume_milestone",
+      tenantId: "apex",
+      tenantName: "Apex Forecast",
+      message: "Apex Forecast crossed $50M cumulative volume",
+      ts: now - 12 * DAY,
+    },
+    {
+      type: "trader_passed",
+      tenantId: "proppredict",
+      tenantName: "PropPredict",
+      message: "Trader S. Lindqvist passed evaluation — funded account opened",
+      ts: now - 9 * DAY,
+    },
+    {
+      type: "market_created",
+      tenantId: "apex",
+      tenantName: "Apex Forecast",
+      message: "New market template deployed: NVDA market cap target",
+      ts: now - 7 * DAY,
+    },
+    {
+      type: "risk_alert",
+      tenantId: "nova",
+      tenantName: "Nova Markets",
+      message: "3 traders exceeded 75% drawdown budget — risk review triggered",
+      ts: now - 5 * DAY,
+    },
+    {
+      type: "trader_failed",
+      tenantId: "proppredict",
+      tenantName: "PropPredict",
+      message: "Trader D. Whitfield breached max drawdown — account closed",
+      ts: now - 4 * DAY,
+    },
+    {
+      type: "volume_milestone",
+      tenantId: null,
+      tenantName: null,
+      message: "Platform crossed $200M cumulative trading volume",
+      ts: now - 3 * DAY,
+    },
+    {
+      type: "trader_passed",
+      tenantId: "apex",
+      tenantName: "Apex Forecast",
+      message: "Trader J. Tanaka advanced to funded phase",
+      ts: now - 2 * DAY,
+    },
+    {
+      type: "market_created",
+      tenantId: null,
+      tenantName: null,
+      message: "Global template published: Fed rate cut probability",
+      ts: now - 36 * HOUR,
+    },
+    {
+      type: "trader_passed",
+      tenantId: "nova",
+      tenantName: "Nova Markets",
+      message: "Trader A. Petrov passed verification",
+      ts: now - 20 * HOUR,
+    },
+    {
+      type: "risk_alert",
+      tenantId: "apex",
+      tenantName: "Apex Forecast",
+      message: "Daily loss limit breached on 2 accounts — auto-flat triggered",
+      ts: now - 14 * HOUR,
+    },
+    {
+      type: "firm_onboarded",
+      tenantId: "apex",
+      tenantName: "Apex Forecast",
+      message: "Apex Forecast white-label domain verified",
+      ts: now - 8 * HOUR,
+    },
+  ];
+  return items
+    .map((item, i) => ({ ...item, id: `act-${i + 1}`, ts: item.ts - Math.round(rng() * 2 * HOUR) }))
+    .sort((a, b) => b.ts - a.ts);
+}
+
+function generatePlatformAnalytics(now: number): PlatformAnalyticsPoint[] {
+  const rng = createRng(seedFromString("platform-analytics"));
+  const points: PlatformAnalyticsPoint[] = [];
+  let traders = 28;
+  let cumulativeVolume = 0;
+  for (let i = 29; i >= 0; i--) {
+    const dayVolume = Math.round(1_800_000 + rng() * 2_400_000 + i * 45_000);
+    cumulativeVolume += dayVolume;
+    traders += Math.round(rng() * 3 - 0.5);
+    points.push({
+      t: now - i * DAY,
+      volume: dayVolume,
+      revenue: Math.round(dayVolume * 0.022),
+      traders: Math.max(24, traders),
+    });
+  }
+  return points;
+}
+
+function firmVolumeScale(tenantId: string): number {
+  const scales: Record<string, number> = { proppredict: 1.4, apex: 1.1, nova: 0.85 };
+  return scales[tenantId] ?? 1;
+}
+
+/** Per-firm metrics derived from seeded trader data and market volume. */
+export function buildFirmOverview(tenant: TenantConfig, now: number): FirmOverview {
+  const traders = getAdminTraders(tenant.id);
+  const rng = createRng(seedFromString(`firm-metrics:${tenant.id}`));
+  const store = getStore();
+  const baseVolume = store.markets.reduce((sum, m) => sum + m.volume, 0);
+  const scale = firmVolumeScale(tenant.id);
+  const totalVolume = Math.round(baseVolume * scale * (0.18 + rng() * 0.12));
+  const volume24h = Math.round(totalVolume * (0.035 + rng() * 0.025));
+  const finished = traders.filter((t) => t.status !== "active");
+  const passed = traders.filter((t) => t.status === "passed");
+  const onboardedAt = now - Math.round(45 + rng() * 120) * DAY;
+
+  return {
+    id: tenant.id,
+    slug: tenant.slug,
+    name: tenant.name,
+    accent: tenant.branding.accent,
+    logoGlyph: tenant.branding.logoGlyph,
+    isActive: true,
+    traders: traders.length,
+    activeTraders: traders.filter((t) => t.status === "active").length,
+    fundedTraders: passed.length,
+    volume24h,
+    totalVolume,
+    revenue: Math.round(totalVolume * 0.022),
+    passRate: finished.length ? (passed.length / finished.length) * 100 : 0,
+    onboardedAt,
+  };
+}
+
 function createStore(): Store {
   const now = Date.now();
   return {
     markets: generateMarkets(now),
+    globalTemplates: generateGlobalTemplates(now),
+    platformActivity: generatePlatformActivity(now, listTenants()),
+    platformAnalytics: generatePlatformAnalytics(now),
     tenants: new Map(),
     leaderboards: new Map(),
     adminTraders: new Map(),
@@ -462,6 +650,58 @@ export function createMarketFromTemplate(input: CreateMarketInput): Market {
     history,
   };
   store.markets.unshift(market);
+  return market;
+}
+
+export function listGlobalTemplates(): Market[] {
+  return [...getStore().globalTemplates];
+}
+
+export function getPlatformActivityFeed(): PlatformActivity[] {
+  return [...getStore().platformActivity].sort((a, b) => b.ts - a.ts);
+}
+
+export function getPlatformAnalyticsSeries(): PlatformAnalyticsPoint[] {
+  return [...getStore().platformAnalytics];
+}
+
+export function listFirmOverviews(): FirmOverview[] {
+  const now = Date.now();
+  return listTenants().map((tenant) => buildFirmOverview(tenant, now));
+}
+
+/** Adds a platform-wide market template firms can adopt. */
+export function createGlobalMarketTemplate(input: CreateMarketInput): Market {
+  const store = getStore();
+  const now = Date.now();
+  const price = Math.min(0.97, Math.max(0.03, input.initialProbability));
+  const history: PricePoint[] = Array.from({ length: 12 }, (_, i) => ({
+    t: now - (11 - i) * HOUR,
+    p: price,
+  }));
+  const market: Market = {
+    id: `mkt-${store.globalTemplates.length + 1}-g`,
+    question: input.question.trim(),
+    category: input.category,
+    status: "open",
+    yesPrice: price,
+    change24h: 0,
+    volume: 0,
+    volume24h: 0,
+    openInterest: 0,
+    traders: 0,
+    closesAt: input.closesAt,
+    history,
+  };
+  store.globalTemplates.unshift(market);
+  store.platformActivity.unshift({
+    id: `act-live-${Date.now()}`,
+    type: "market_created",
+    tenantId: null,
+    tenantName: null,
+    message: `Global template published: ${market.question.slice(0, 60)}${market.question.length > 60 ? "…" : ""}`,
+    ts: now,
+  });
   return market;
 }
 

@@ -149,6 +149,73 @@ export interface AdminTrader {
   lastActiveAt: number;
 }
 
+/** Platform-owner view of one prop firm. */
+export interface FirmOverview {
+  id: string;
+  slug: string;
+  name: string;
+  accent: string;
+  logoGlyph: string;
+  isActive: boolean;
+  traders: number;
+  activeTraders: number;
+  fundedTraders: number;
+  volume24h: number;
+  totalVolume: number;
+  revenue: number;
+  passRate: number;
+  onboardedAt: number;
+}
+
+export type PlatformActivityType =
+  | "firm_onboarded"
+  | "trader_passed"
+  | "trader_failed"
+  | "market_created"
+  | "volume_milestone"
+  | "risk_alert";
+
+export interface PlatformActivity {
+  id: string;
+  type: PlatformActivityType;
+  tenantId: string | null;
+  tenantName: string | null;
+  message: string;
+  ts: number;
+}
+
+/** Platform-wide KPI snapshot for the Super Admin overview. */
+export interface PlatformStats {
+  totalFirms: number;
+  activeFirms: number;
+  totalTraders: number;
+  activeTraders: number;
+  volume24h: number;
+  totalVolume: number;
+  revenue: number;
+  revenue24h: number;
+  avgPassRate: number;
+}
+
+/** One day in the system-wide analytics time series. */
+export interface PlatformAnalyticsPoint {
+  /** Unix timestamp (ms), start of day. */
+  t: number;
+  volume: number;
+  revenue: number;
+  traders: number;
+}
+
+/** Drill-down detail for a single prop firm. */
+export interface FirmDetail extends FirmOverview {
+  tagline: string;
+  atRiskTraders: number;
+  failedTraders: number;
+  avgWinRate: number;
+  totalEquity: number;
+  roster: AdminTrader[];
+}
+
 export interface PortfolioSummary {
   balance: number;
   equity: number;

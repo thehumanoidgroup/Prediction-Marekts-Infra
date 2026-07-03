@@ -6,6 +6,7 @@ import type { ComponentType, SVGProps } from "react";
 import { cn } from "@/lib/utils";
 import {
   IconDashboard,
+  IconGlobe,
   IconJournal,
   IconMarkets,
   IconPalette,
@@ -41,6 +42,7 @@ const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   users: IconUsers,
   sliders: IconSliders,
   palette: IconPalette,
+  globe: IconGlobe,
 };
 
 function isActive(pathname: string, item: NavItem): boolean {

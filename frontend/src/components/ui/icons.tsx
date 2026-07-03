@@ -202,3 +202,12 @@ export function IconPalette(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function IconGlobe(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5a13 13 0 014 8.5 13 13 0 01-4 8.5 13 13 0 01-4-8.5 13 13 0 014-8.5z" />
+    </Icon>
+  );
+}
