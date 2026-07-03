@@ -1,4 +1,19 @@
-"""REST endpoints for Polymarket market discovery (read-only)."""
+"""REST endpoints for Polymarket market discovery and operator health checks.
+
+All routes are mounted at ``/api/polymarket`` and delegate to
+:class:`integrations.polymarket.PolymarketService`.
+
+Endpoints
+---------
+GET /markets
+    Paginated market list with category, status, active, and sort filters.
+GET /markets/{market_id}
+    Single market by ``poly-0x…`` id or condition id.
+GET /search
+    Full-text search (``q`` required) with the same filters/pagination.
+GET /status
+    CLOB connectivity, Redis cache, and auth mode for admin dashboards.
+"""
 
 from __future__ import annotations
 
@@ -92,6 +107,16 @@ async def _load_markets(*, active_only: bool, refresh: bool) -> list[dict[str, A
     if active_only:
         return await service.get_active_markets(refresh=refresh)
     return await service.get_all_markets(refresh=refresh)
+
+
+@router.get("/status")
+async def polymarket_integration_status() -> dict:
+    """Return Polymarket CLOB connectivity and cache status for operators."""
+    service = get_polymarket_service()
+    try:
+        return await service.get_integration_status()
+    except PolymarketError as exc:
+        raise HTTPException(502, detail=str(exc)) from exc
 
 
 @router.get("/markets")

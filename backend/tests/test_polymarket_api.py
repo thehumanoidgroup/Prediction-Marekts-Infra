@@ -104,3 +104,39 @@ def test_get_polymarket_market_not_found(client):
         response = client.get("/api/polymarket/markets/poly-0xmissing")
 
     assert response.status_code == 404
+
+
+def test_polymarket_integration_status(client):
+    mock_service = AsyncMock()
+    mock_service.get_integration_status = AsyncMock(
+        return_value={
+            "provider": "polymarket",
+            "enabled": True,
+            "healthy": True,
+            "host": "https://clob.polymarket.com",
+            "chainId": 137,
+            "authLevel": 0,
+            "authMode": "public",
+            "hasWallet": False,
+            "hasApiCredentials": False,
+            "canTrade": False,
+            "redis": "connected",
+            "clob": "connected",
+            "marketSampleSize": 1000,
+            "latencyMs": 42.5,
+            "cachedMarketCount": 500,
+            "error": None,
+        }
+    )
+
+    with patch(
+        "app.api.routes.polymarket.get_polymarket_service",
+        return_value=mock_service,
+    ):
+        response = client.get("/api/polymarket/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["healthy"] is True
+    assert body["clob"] == "connected"
+    mock_service.get_integration_status.assert_awaited_once()

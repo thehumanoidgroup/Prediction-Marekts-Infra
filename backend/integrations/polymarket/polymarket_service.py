@@ -344,6 +344,57 @@ class PolymarketService:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to invalidate Polymarket Redis cache")
 
+    async def get_integration_status(self) -> dict[str, Any]:
+        """Return a health snapshot for operators (CLOB reachability, cache, auth).
+
+        Probes the Polymarket CLOB with a lightweight ``get_markets`` call and
+        reports Redis cache availability. Safe to expose on an admin dashboard.
+        """
+        import time
+
+        from py_clob_client_v2.constants import L0, L1, L2
+
+        auth_labels = {L0: "public", L1: "wallet", L2: "trading"}
+        started = time.monotonic()
+
+        status: dict[str, Any] = {
+            "provider": "polymarket",
+            "enabled": True,
+            "host": self._client.host,
+            "chainId": self._client.chain_id,
+            "authLevel": self._client.auth_level,
+            "authMode": auth_labels.get(self._client.auth_level, "unknown"),
+            "hasWallet": self._client.has_wallet,
+            "hasApiCredentials": self._client.is_authenticated,
+            "canTrade": self._client.can_trade,
+            "redis": "unavailable",
+            "clob": "unknown",
+            "marketSampleSize": None,
+            "latencyMs": None,
+            "cachedMarketCount": None,
+            "error": None,
+        }
+
+        redis = await self._get_redis()
+        status["redis"] = "connected" if redis is not None else "unavailable"
+
+        cached = await self._cache_get(CACHE_ALL_MARKETS)
+        if isinstance(cached, list):
+            status["cachedMarketCount"] = len(cached)
+
+        try:
+            page = await self._client.get_markets()
+            status["clob"] = "connected"
+            status["marketSampleSize"] = len(page.data)
+            status["latencyMs"] = round((time.monotonic() - started) * 1000, 1)
+        except PolymarketError as exc:
+            status["clob"] = "error"
+            status["error"] = str(exc)
+            status["latencyMs"] = round((time.monotonic() - started) * 1000, 1)
+
+        status["healthy"] = status["clob"] == "connected"
+        return status
+
     async def close(self) -> None:
         if self._redis is not None:
             await self._redis.aclose()

@@ -1,4 +1,16 @@
-"""Polymarket integration exceptions."""
+"""Polymarket integration exceptions.
+
+Exception hierarchy
+-------------------
+PolymarketError
+    Base class for all integration failures.
+PolymarketAuthError
+    Missing or invalid wallet / API credentials.
+PolymarketApiError
+    Non-success HTTP response from the CLOB API (``status_code`` set).
+PolymarketTimeoutError
+    SDK call exceeded ``PP_POLYMARKET_REQUEST_TIMEOUT_SECONDS``.
+"""
 
 from __future__ import annotations
 

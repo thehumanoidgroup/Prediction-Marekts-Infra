@@ -59,6 +59,25 @@ export type PolymarketMarket = Market & {
   externalConditionId: string;
 };
 
+export interface PolymarketIntegrationStatus {
+  provider: "polymarket";
+  enabled: boolean;
+  healthy: boolean;
+  host: string;
+  chainId: number;
+  authLevel: number;
+  authMode: string;
+  hasWallet: boolean;
+  hasApiCredentials: boolean;
+  canTrade: boolean;
+  redis: "connected" | "unavailable" | string;
+  clob: "connected" | "error" | "unknown" | string;
+  marketSampleSize: number | null;
+  latencyMs: number | null;
+  cachedMarketCount: number | null;
+  error: string | null;
+}
+
 export interface Position {
   id: string;
   marketId: string;

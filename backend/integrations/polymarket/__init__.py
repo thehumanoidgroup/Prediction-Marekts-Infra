@@ -1,4 +1,14 @@
-"""Polymarket CLOB integration (Python SDK wrapper)."""
+"""Polymarket CLOB integration for PropPredict.
+
+This package wraps the official ``py-clob-client-v2`` SDK with:
+
+- :class:`PolymarketClient` — async-friendly low-level CLOB access
+- :class:`PolymarketService` — cached market discovery + normalization
+- Typed exceptions for API, auth, and timeout failures
+
+Read :doc:`README` in this directory for configuration, REST endpoints,
+and usage examples.
+"""
 
 from .exceptions import (
     PolymarketApiError,

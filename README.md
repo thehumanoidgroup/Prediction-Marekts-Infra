@@ -36,7 +36,9 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 │       ├── schemas/           # Pydantic request/response models
 │       ├── api/
 │       │   ├── deps.py        # tenant resolution, current user, role guards
-│       │   └── routes/        # auth, tenants (theming), health, ws
+│       │   └── routes/        # auth, tenants, trading, polymarket, health, ws
+│       ├── integrations/
+│       │   └── polymarket/    # py-clob-client-v2 wrapper, service, caching
 │       └── ws/
 │           ├── manager.py     # tenant-aware WebSocket fan-out via Redis pub/sub
 │           └── ticker.py      # demo market price broadcaster
@@ -120,6 +122,10 @@ Seeded in development (password for all: `demo-password-123`):
 | `/api/v1/tenants/current` | GET | — | White-label config for the requesting firm |
 | `/api/v1/tenants/current` | PATCH | PropFirmAdmin | Update branding / features / program |
 | `/api/v1/tenants` | GET/POST | SuperAdmin | List / onboard firms |
+| `/api/polymarket/markets` | GET | — | List Polymarket markets (paginated, filterable) |
+| `/api/polymarket/markets/{id}` | GET | — | Single Polymarket market |
+| `/api/polymarket/search` | GET | — | Search Polymarket markets (`q` required) |
+| `/api/polymarket/status` | GET | — | Polymarket CLOB + cache health |
 | `/ws/markets/{tenant_slug}` | WS | — | Real-time price ticks (per-tenant channel) |
 
 ## Real-time pipeline
@@ -135,3 +141,74 @@ alembic upgrade head
 ```
 
 In development the app auto-creates tables on startup; production should rely on Alembic only.
+
+## Polymarket integration
+
+PropPredict can display live [Polymarket](https://polymarket.com) prediction markets alongside internal LMSR markets. The integration uses the official [`py-clob-client-v2`](https://github.com/Polymarket/py-clob-client-v2) SDK, wrapped for async use and Redis caching.
+
+**Detailed docs:** [`backend/integrations/polymarket/README.md`](backend/integrations/polymarket/README.md)
+
+### Enable
+
+1. Dependency is already in `backend/requirements.txt` (`py-clob-client-v2`).
+2. Set environment variables (read-only mode works with defaults only):
+
+```bash
+PP_POLYMARKET_HOST=https://clob.polymarket.com
+PP_POLYMARKET_CHAIN_ID=137
+PP_REDIS_URL=redis://localhost:6379/0   # recommended for caching
+```
+
+Optional credentials for authenticated trading (L2):
+
+```bash
+PP_POLYMARKET_PRIVATE_KEY=0x...
+PP_POLYMARKET_API_KEY=...
+PP_POLYMARKET_API_SECRET=...
+PP_POLYMARKET_API_PASSPHRASE=...
+```
+
+3. Restart the backend. Verify connectivity:
+
+```bash
+curl http://localhost:8000/api/polymarket/status
+```
+
+### Python SDK wrapper
+
+```python
+import asyncio
+from integrations.polymarket import PolymarketClient, get_polymarket_service
+
+async def main() -> None:
+    # Low-level async client (wraps py-clob-client-v2)
+    client = PolymarketClient.from_settings()
+    page = await client.get_markets()
+    print(len(page.data), "markets on first page")
+
+    # High-level cached service
+    service = get_polymarket_service()
+    markets = await service.get_active_markets()
+    print(len(markets), "active markets")
+
+asyncio.run(main())
+```
+
+### REST examples
+
+```bash
+# List active markets (paginated)
+curl "http://localhost:8000/api/polymarket/markets?active=true&page=1&pageSize=10"
+
+# Search
+curl "http://localhost:8000/api/polymarket/search?q=bitcoin"
+
+# Single market
+curl "http://localhost:8000/api/polymarket/markets/poly-0x..."
+```
+
+### Trader UI
+
+- `/markets` — toggle **Internal Markets** / **Polymarket Markets**
+- `/dashboard` — preview section with the same toggle
+- `/platform/integrations` — Super Admin connection status (SuperAdmin)

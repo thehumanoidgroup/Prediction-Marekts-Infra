@@ -5,6 +5,7 @@ import type {
   Market,
   Order,
   Outcome,
+  PolymarketIntegrationStatus,
   PortfolioSummary,
   Position,
 } from "@/lib/types";
@@ -179,6 +180,10 @@ export async function fetchBackendPolymarketMarket(
   marketId: string,
 ): Promise<{ market: Market } | null> {
   return backendFetchRoot<{ market: Market }>(`/polymarket/markets/${encodeURIComponent(marketId)}`);
+}
+
+export async function fetchBackendPolymarketStatus(): Promise<PolymarketIntegrationStatus | null> {
+  return backendFetchRoot<PolymarketIntegrationStatus>("/polymarket/status");
 }
 
 export async function postBackendOrder(
