@@ -3,7 +3,6 @@ import {
   createMarketFromTemplate,
   getAdminTraders as storeAdminTraders,
   getLeaderboard,
-  getPlatformActivityFeed,
   getPlatformAnalyticsSeries,
   getStore,
   getTenantOverrides,
@@ -14,6 +13,7 @@ import {
   type CreateMarketInput,
   type TenantOverrides,
 } from "@/lib/store";
+import { getMergedPlatformActivity } from "@/lib/platform/activity";
 import { getTenant, listTenants, type TenantConfig } from "@/lib/tenants";
 import type {
   AdminTrader,
@@ -408,8 +408,8 @@ export function getPlatformAnalytics(): PlatformAnalyticsPoint[] {
   return getPlatformAnalyticsSeries();
 }
 
-export function getPlatformActivity(): PlatformActivity[] {
-  return getPlatformActivityFeed();
+export async function getPlatformActivity(): Promise<PlatformActivity[]> {
+  return getMergedPlatformActivity();
 }
 
 export function listGlobalMarketTemplates(): Market[] {

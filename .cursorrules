@@ -6,6 +6,7 @@ PropPredict is a **single Next.js 15 application** (App Router) deployable on Ve
 
 - **Stack**: Next.js 15, React 19, Tailwind CSS v4, Prisma (PostgreSQL), in-memory LMSR trading engine
 - **Multi-tenant**: firm-scoped branding via middleware + Prisma `Tenant` model
+- **Provisioning**: `PropFirmAccount`, `ChallengeConfig`, `TraderDemoAccount` (see `prisma/schema.prisma`)
 - **Polymarket**: TypeScript CLOB integration in `lib/polymarket/`
 
 ## Structure
@@ -17,7 +18,7 @@ lib/           # Core utilities, store, polymarket, auth, db
 services/      # Business logic (markets, portfolio, orders)
 hooks/         # Client hooks
 types/         # Shared TypeScript types
-prisma/        # Database schema (Tenant, User)
+prisma/        # Database schema (Tenant, User, PropFirmAccount, …)
 middleware.ts  # Tenant resolution
 ```
 
@@ -29,7 +30,7 @@ All backend logic runs as Next.js Route Handlers under `app/api/`:
 - `/api/markets`, `/api/orders`, `/api/portfolio`, `/api/journal`
 - `/api/polymarket/*` — Polymarket CLOB market discovery
 - `/api/tenant`, `/api/admin/tenant` — white-label config
-- `/api/platform/*` — Super Admin endpoints
+- `/api/provisioning/*` — account provisioning (webhook, manual, list)
 
 ## Conventions
 

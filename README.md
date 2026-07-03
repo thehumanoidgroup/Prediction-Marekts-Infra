@@ -82,6 +82,48 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/polymarket/search` | GET | Search Polymarket markets |
 | `/api/platform/integrations/polymarket` | GET | Integration health |
 
+### Account provisioning
+
+Automated prop firm account provisioning: sold evaluations, encrypted credentials, challenge rules, emails, and audit logging.
+
+| Route | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/api/provisioning/webhook` | POST | Per-firm API key | Checkout webhook (rate-limited) |
+| `/api/provisioning/manual` | POST | Super Admin JWT | Manual account creation |
+| `/api/provisioning/accounts` | GET | Super Admin JWT | List provisioned accounts |
+| `/api/provisioning/accounts/[id]` | GET | Super Admin JWT | Account detail |
+| `/api/provisioning/jobs/[id]` | GET | Super Admin JWT | Async job status |
+| `/api/admin/provisioning-settings` | GET, PATCH | Prop Firm Admin | Default rules per model type |
+
+**Super Admin UI:** `/platform/provisioning` — manual provisioning, audit log, recent accounts.
+
+**Prop Firm Admin UI:** `/admin/provisioning` — allowed sizes, per-model defaults, override policy.
+
+```bash
+# Example webhook (after npx prisma db push and seed)
+curl -X POST https://your-app.vercel.app/api/provisioning/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ppk_..." \
+  -d '{
+    "prop_firm_id": "<tenant-uuid>",
+    "trader_email": "buyer@example.com",
+    "model_type": "2step",
+    "account_size": "100K",
+    "custom_rules": { "profitTarget": 9 }
+  }'
+```
+
+Key environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `CREDENTIALS_ENCRYPTION_KEY` | AES-256-GCM encryption for stored login credentials (required in production) |
+| `RESEND_API_KEY` | Provisioning notification emails |
+| `PROVISIONING_ASYNC` | Enqueue provisioning instead of inline processing |
+| `PROVISIONING_WEBHOOK_RATE_LIMIT` | Max webhook requests per window (default 60/min) |
+
+See `lib/provisioning/README.md` for the full provisioning architecture.
+
 ## Multi-tenancy
 
 Tenant resolution order (see `middleware.ts`):
@@ -104,6 +146,7 @@ Read-only Polymarket CLOB listings work out of the box. Optional env vars for tr
 npm run dev        # Start dev server
 npm run build      # Production build
 npm run typecheck  # TypeScript check
+npm test           # Provisioning unit tests (Vitest)
 npx prisma studio  # Browse database
 ```
 

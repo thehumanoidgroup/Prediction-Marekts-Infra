@@ -13,21 +13,106 @@ enum UserRole {
   super_admin
 }
 
+/// Evaluation program tier sold to a trader (1-step, 2-step, etc.).
+enum PropFirmModelType {
+  one_step   @map("1step")
+  two_step   @map("2step")
+  three_step @map("3step")
+  instant
+}
+
+/// Nominal account size tier for a sold prop firm account.
+enum AccountSize {
+  size_10k   @map("10K")
+  size_25k   @map("25K")
+  size_50k   @map("50K")
+  size_100k  @map("100K")
+  size_500k  @map("500K")
+  size_1m    @map("1M")
+  size_2m    @map("2M")
+}
+
+/// Lifecycle of automated account provisioning.
+enum PropFirmAccountStatus {
+  pending
+  provisioned
+  activated
+  expired
+}
+
+/// Background provisioning job state (database queue).
+enum ProvisioningJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum ProvisioningJobSource {
+  webhook
+  manual
+}
+
+/// Whether max bet size is expressed as a percentage or fixed USD amount.
+enum MaxBetSizeMode {
+  percent
+  fixed
+}
+
 model Tenant {
-  id        String   @id @default(uuid())
-  slug      String   @unique
-  clientKey String   @unique @map("client_key")
-  name      String
-  tagline   String   @default("")
-  isActive  Boolean  @default(true) @map("is_active")
-  branding  Json
-  features  Json
-  program   Json
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  users     User[]
+  id               String            @id @default(uuid())
+  slug             String            @unique
+  clientKey        String            @unique @map("client_key")
+  name             String
+  tagline          String            @default("")
+  isActive         Boolean           @default(true) @map("is_active")
+  branding         Json
+  features         Json
+  program          Json
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  users            User[]
+  propFirmAccounts PropFirmAccount[]
+  apiKeys          PropFirmApiKey[]
+  settings         PropFirmSettings?
 
   @@map("tenants")
+}
+
+/// Webhook API key for automated account provisioning (one firm, many keys).
+model PropFirmApiKey {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  label      String    @default("default")
+  keyPrefix  String    @unique @map("key_prefix")
+  keyHash    String    @map("key_hash")
+  isActive   Boolean   @default(true) @map("is_active")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("prop_firm_api_keys")
+}
+
+/// Per-firm provisioning defaults: model rules, allowed sizes, override policy.
+model PropFirmSettings {
+  id                    String              @id @default(uuid())
+  tenantId              String              @unique @map("tenant_id")
+  tenant                Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  allowedModelTypes     PropFirmModelType[] @default([one_step, two_step, three_step, instant]) @map("allowed_model_types")
+  allowedAccountSizes   AccountSize[]       @default([size_10k, size_25k, size_50k, size_100k]) @map("allowed_account_sizes")
+  /// Per-model default challenge rules (API keys: 1step, 2step, …).
+  modelDefaults         Json                @default("{}") @map("model_defaults")
+  /// Custom rule field names purchasers may override at sale time.
+  allowedOverrideFields Json                @default("[]") @map("allowed_override_fields")
+  /// Firm-wide custom JSON merged into every new account.
+  defaultCustomRules    Json                @default("{}") @map("default_custom_rules")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@map("prop_firm_settings")
 }
 
 model User {
@@ -44,4 +129,122 @@ model User {
 
   @@unique([tenantId, email])
   @@map("users")
+}
+
+/// A sold prop firm evaluation account awaiting or after automated provisioning.
+model PropFirmAccount {
+  id                String                @id @default(uuid())
+  propFirmId        String                @map("prop_firm_id")
+  propFirm          Tenant                @relation(fields: [propFirmId], references: [id], onDelete: Cascade)
+  traderEmail       String                @map("trader_email")
+  modelType         PropFirmModelType     @map("model_type")
+  accountSize       AccountSize           @map("account_size")
+  status            PropFirmAccountStatus @default(pending)
+  purchasedAt       DateTime              @map("purchased_at")
+  credentialsSentAt DateTime?             @map("credentials_sent_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  challengeConfig   ChallengeConfig?
+  traderDemoAccount TraderDemoAccount?
+
+  @@index([propFirmId])
+  @@index([traderEmail])
+  @@index([status])
+  @@index([purchasedAt])
+  @@index([propFirmId, status])
+  @@map("prop_firm_accounts")
+}
+
+/// Challenge rules attached to a single sold account.
+model ChallengeConfig {
+  id                 String          @id @default(uuid())
+  propFirmAccountId  String          @unique @map("prop_firm_account_id")
+  propFirmAccount    PropFirmAccount @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
+  profitTarget       Decimal         @map("profit_target") @db.Decimal(8, 4)
+  dailyDrawdown      Decimal         @map("daily_drawdown") @db.Decimal(8, 4)
+  maxDrawdown        Decimal         @map("max_drawdown") @db.Decimal(8, 4)
+  maxBetSizeValue    Decimal         @map("max_bet_size_value") @db.Decimal(14, 2)
+  maxBetSizeMode     MaxBetSizeMode  @default(percent) @map("max_bet_size_mode")
+  consistencyScore   Decimal?        @map("consistency_score") @db.Decimal(8, 4)
+  otherCustomRules   Json            @default("{}") @map("other_custom_rules")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  traderDemoAccounts TraderDemoAccount[]
+
+  @@map("challenge_configs")
+}
+
+/// Provisioned demo trading account with encrypted login credentials.
+model TraderDemoAccount {
+  id                    String          @id @default(uuid())
+  propFirmAccountId     String          @unique @map("prop_firm_account_id")
+  propFirmAccount       PropFirmAccount @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
+  challengeConfigId     String          @map("challenge_config_id")
+  challengeConfig       ChallengeConfig @relation(fields: [challengeConfigId], references: [id], onDelete: Restrict)
+  virtualBalance        Decimal         @map("virtual_balance") @db.Decimal(14, 2)
+  loginCredentials      String          @map("login_credentials") @db.Text
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  @@index([challengeConfigId])
+  @@map("trader_demo_accounts")
+}
+
+/// Durable Super Admin activity feed (provisioning, onboarding, etc.).
+model PlatformActivityLog {
+  id         String   @id @default(uuid())
+  type       String
+  tenantId   String?  @map("tenant_id")
+  tenantName String?  @map("tenant_name")
+  message    String   @db.Text
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)])
+  @@map("platform_activity_logs")
+}
+
+/// Async provisioning job queue (database-backed; optional Redis trigger via env).
+model ProvisioningJob {
+  id                String                @id @default(uuid())
+  status            ProvisioningJobStatus @default(pending)
+  source            ProvisioningJobSource
+  payload           Json
+  propFirmAccountId String?               @map("prop_firm_account_id")
+  result            Json?
+  error             String?               @db.Text
+  attempts          Int                   @default(0)
+  maxAttempts       Int                   @default(3) @map("max_attempts")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  startedAt         DateTime?             @map("started_at")
+  completedAt       DateTime?             @map("completed_at")
+
+  @@index([status, createdAt])
+  @@map("provisioning_jobs")
+}
+
+/// Immutable audit trail for every provisioning attempt.
+model ProvisioningAuditLog {
+  id                     String            @id @default(uuid())
+  propFirmAccountId      String?           @map("prop_firm_account_id")
+  propFirmId             String            @map("prop_firm_id")
+  traderEmail            String            @map("trader_email")
+  modelType              PropFirmModelType @map("model_type")
+  accountSize            AccountSize       @map("account_size")
+  source                 String
+  status                 String
+  credentialsFingerprint String?           @map("credentials_fingerprint")
+  apiKeyId               String?           @map("api_key_id")
+  actorUserId            String?           @map("actor_user_id")
+  ipAddress              String?           @map("ip_address")
+  errorCode              String?           @map("error_code")
+  errorMessage           String?           @map("error_message") @db.Text
+  metadata               Json              @default("{}")
+  createdAt              DateTime          @default(now()) @map("created_at")
+
+  @@index([propFirmId, createdAt(sort: Desc)])
+  @@index([propFirmAccountId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("provisioning_audit_logs")
 }

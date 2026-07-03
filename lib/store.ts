@@ -709,4 +709,13 @@ export function createGlobalMarketTemplate(input: CreateMarketInput): Market {
   return market;
 }
 
+/** Append a live event to the in-memory Super Admin activity feed. */
+export function recordPlatformActivity(item: PlatformActivity): void {
+  const store = getStore();
+  store.platformActivity.unshift(item);
+  if (store.platformActivity.length > 200) {
+    store.platformActivity.length = 200;
+  }
+}
+
 export { buildObjectives };

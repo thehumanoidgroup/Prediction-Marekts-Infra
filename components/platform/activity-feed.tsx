@@ -10,6 +10,8 @@ const typeLabels: Record<PlatformActivityType, string> = {
   market_created: "Market",
   volume_milestone: "Milestone",
   risk_alert: "Risk",
+  account_provisioned: "Provisioned",
+  account_provisioning_failed: "Provision failed",
 };
 
 const typeTones: Record<PlatformActivityType, "accent" | "up" | "down" | "warn"> = {
@@ -19,6 +21,8 @@ const typeTones: Record<PlatformActivityType, "accent" | "up" | "down" | "warn">
   market_created: "accent",
   volume_milestone: "up",
   risk_alert: "warn",
+  account_provisioned: "up",
+  account_provisioning_failed: "down",
 };
 
 /** Chronological platform activity list for the Super Admin overview. */

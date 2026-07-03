@@ -3,5 +3,6 @@ import { getPlatformActivity } from "@/lib/services";
 
 /** Recent platform-wide activity feed (SuperAdmin). */
 export async function GET() {
-  return NextResponse.json({ activity: getPlatformActivity() });
+  const activity = await getPlatformActivity();
+  return NextResponse.json({ activity });
 }
