@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "realtime": "tsx server/realtime-ws.ts",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "prisma db push"
@@ -18,6 +19,7 @@
     "bcryptjs": "^3.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ioredis": "^5.7.0",
     "jose": "^6.0.11",
     "next": "^15.5.20",
     "react": "^19.2.7",
@@ -25,6 +27,7 @@
     "recharts": "^3.9.1",
     "resend": "^4.8.0",
     "tailwind-merge": "^3.6.0",
+    "ws": "^8.18.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -36,7 +39,9 @@
     "postcss": "^8.5.16",
     "prisma": "^6.19.0",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.20.3",
     "typescript": "5.9",
+    "@types/ws": "^8.18.1",
     "vitest": "^3.2.4"
   }
 }

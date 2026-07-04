@@ -11,6 +11,7 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 | Database | PostgreSQL via Prisma (`Tenant`, `User`) |
 | Trading engine | In-memory LMSR market maker (`lib/store.ts`) |
 | Polymarket | TypeScript CLOB client (`lib/polymarket/`) |
+| Real-time | WebSocket server + Redis pub/sub (`lib/realtime/`) |
 | Auth | JWT (jose) + bcrypt password hashing |
 | Deployment | **Vercel** — one repo, one build, no separate backend |
 
@@ -23,7 +24,8 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 │   └── api/                 # All backend endpoints (Route Handlers)
 ├── components/              # UI, dashboard, markets, admin, platform
 ├── hooks/                   # Client data hooks
-├── lib/                     # Store, auth, db, polymarket, tenants
+├── lib/                     # Store, auth, db, polymarket, realtime, tenants
+├── server/                  # Standalone WebSocket server (realtime-ws.ts)
 ├── services/                # Business logic layer
 ├── types/                   # Shared TypeScript types
 ├── prisma/schema.prisma     # Database schema
@@ -42,6 +44,7 @@ cp .env.example .env.local
 npm install
 npx prisma db push    # create tables
 npm run dev           # http://localhost:3000
+npm run realtime      # WebSocket server (optional, for live prices)
 ```
 
 ### Demo credentials (after first DB seed)
@@ -123,6 +126,29 @@ Key environment variables:
 | `PROVISIONING_WEBHOOK_RATE_LIMIT` | Max webhook requests per window (default 60/min) |
 
 See `lib/provisioning/README.md` for the full provisioning architecture.
+
+### Real-time live feed
+
+WebSocket + Redis pub/sub for live price/probability updates. Equivalent of the requested `backend/realtime/websocket_manager.py` and `event_broadcaster.py` as TypeScript modules under `lib/realtime/`.
+
+| Component | Purpose |
+| --- | --- |
+| `lib/realtime/websocket-manager.ts` | Connection management, subscriptions, heartbeats |
+| `lib/realtime/event-broadcaster.ts` | Redis pub/sub broadcast |
+| `server/realtime-ws.ts` | Standalone WebSocket server (`npm run realtime`) |
+| `GET /api/realtime/health` | Redis + WebSocket health |
+
+```bash
+# Terminal 1: Next.js
+npm run dev
+
+# Terminal 2: WebSocket server
+npm run realtime
+```
+
+Set `NEXT_PUBLIC_REALTIME_WS_URL=ws://localhost:3001/realtime` and optional `REDIS_URL` for multi-instance pub/sub.
+
+See `lib/realtime/README.md` for subscription protocol and production deployment.
 
 ## Multi-tenancy
 

@@ -9,13 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { RealtimeEvent } from "@/lib/realtime/types";
 
 /**
  * Live market prices for the whole app.
  *
- * Uses a client-side random-walk simulator so prices feel real-time on Vercel
- * without a separate WebSocket server. Server components render initial prices;
- * hydration is safe because client state starts from the same `initialPrices`.
+ * Connects to the WebSocket real-time server when `NEXT_PUBLIC_REALTIME_WS_URL`
+ * is set and the server is reachable; otherwise falls back to a client-side
+ * simulator so the UI stays responsive on Vercel without a WS process.
  */
 
 export type FeedStatus = "connecting" | "live" | "simulated";
@@ -28,7 +29,14 @@ interface LivePricesContextValue {
 const LivePricesContext = createContext<LivePricesContextValue | null>(null);
 
 const SIMULATOR_INTERVAL_MS = 1_800;
+const WS_RECONNECT_MS = 5_000;
 const clamp = (p: number) => Math.min(0.97, Math.max(0.03, p));
+
+function getWsUrl(): string | null {
+  const url = process.env.NEXT_PUBLIC_REALTIME_WS_URL;
+  if (!url || url === "false" || url === "off") return null;
+  return url;
+}
 
 export function LivePricesProvider({
   initialPrices,
@@ -41,9 +49,20 @@ export function LivePricesProvider({
   const [prices, setPrices] = useState(initialPrices);
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const simulatorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const useSimulatorRef = useRef(false);
+
+  const stopSimulator = useCallback(() => {
+    if (simulatorRef.current) {
+      clearInterval(simulatorRef.current);
+      simulatorRef.current = null;
+    }
+  }, []);
 
   const startSimulator = useCallback(() => {
     if (simulatorRef.current) return;
+    useSimulatorRef.current = true;
     setStatus("simulated");
     simulatorRef.current = setInterval(() => {
       setPrices((current) => {
@@ -60,15 +79,76 @@ export function LivePricesProvider({
     }, SIMULATOR_INTERVAL_MS);
   }, []);
 
+  const applyEvent = useCallback((event: RealtimeEvent) => {
+    if (event.type !== "price_update") return;
+    setPrices((current) => ({ ...current, [event.marketId]: event.yesPrice }));
+  }, []);
+
+  const reconnectAttempts = useRef(0);
+
+  const connectWebSocket = useCallback(() => {
+    const wsUrl = getWsUrl();
+    if (!wsUrl) {
+      startSimulator();
+      return;
+    }
+
+    stopSimulator();
+    useSimulatorRef.current = false;
+    setStatus("connecting");
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttempts.current = 0;
+        setStatus("live");
+        ws.send(JSON.stringify({ op: "subscribe", scope: "all" }));
+        ws.send(JSON.stringify({ op: "subscribe", scope: "event", eventType: "price_update" }));
+      };
+
+      ws.onmessage = (message) => {
+        try {
+          const payload = JSON.parse(message.data as string) as {
+            type: string;
+            event?: RealtimeEvent;
+          };
+          if (payload.type === "event" && payload.event) {
+            applyEvent(payload.event);
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        reconnectAttempts.current += 1;
+        if (reconnectAttempts.current > 3) {
+          startSimulator();
+          return;
+        }
+        reconnectRef.current = setTimeout(connectWebSocket, WS_RECONNECT_MS);
+      };
+    } catch {
+      startSimulator();
+    }
+  }, [applyEvent, startSimulator, stopSimulator]);
+
   useEffect(() => {
-    startSimulator();
+    connectWebSocket();
     return () => {
-      if (simulatorRef.current) {
-        clearInterval(simulatorRef.current);
-        simulatorRef.current = null;
-      }
+      stopSimulator();
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      wsRef.current?.close();
+      wsRef.current = null;
     };
-  }, [startSimulator]);
+  }, [connectWebSocket, stopSimulator]);
 
   return (
     <LivePricesContext.Provider value={{ prices, status }}>{children}</LivePricesContext.Provider>
