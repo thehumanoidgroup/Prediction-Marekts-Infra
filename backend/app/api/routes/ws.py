@@ -12,6 +12,7 @@ async def markets_feed(websocket: WebSocket, tenant_slug: str) -> None:
     """Real-time market data stream, one channel per tenant.
 
     Server → client:
+    - ``batch_update`` — coalesced live event frames (preferred)
     - ``price_update`` / ``status_change`` / ``new_event`` from the live event broadcaster
     - Legacy ``price_tick`` events from the ticker
 
@@ -22,10 +23,20 @@ async def markets_feed(websocket: WebSocket, tenant_slug: str) -> None:
         {"type": "subscribe", "rooms": ["all", "category:crypto", "event:<id>"]}
         {"type": "unsubscribe", "rooms": ["category:crypto"]}
     """
-    await manager.connect(tenant_slug, websocket)
+    accepted = await manager.connect(tenant_slug, websocket)
+    if not accepted:
+        await websocket.close(code=1008, reason="Connection rate or capacity limit exceeded")
+        return
+
     try:
         while True:
             raw = await websocket.receive_text()
+            if not await manager.register_message(websocket):
+                await websocket.send_text(
+                    json.dumps({"type": "error", "code": "rate_limited", "message": "Too many messages"})
+                )
+                continue
+
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:

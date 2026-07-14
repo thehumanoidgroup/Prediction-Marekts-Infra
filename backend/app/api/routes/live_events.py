@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,6 +16,7 @@ from app.schemas.live_event import (
     UpdateProbabilityBody,
 )
 from services.live_event_service import LiveEventService, get_live_event_service
+from services.live_feed_analytics import analytics
 
 router = APIRouter(prefix="/live-events", tags=["live-events"])
 
@@ -58,6 +59,14 @@ async def get_live_event(
     if match is None:
         raise HTTPException(404, detail="Live event not found")
     return LiveEventResponse.model_validate(match)
+
+
+@router.post("/{event_id}/view", status_code=status.HTTP_204_NO_CONTENT)
+async def record_event_view(event_id: str, service: Annotated[LiveEventService, Depends(_service)]) -> None:
+    event = await service._resolve_event(event_id)
+    if event is None:
+        raise HTTPException(404, detail="Live event not found")
+    analytics.record_event_view(event.id)
 
 
 @router.post("/{event_id}/probability", response_model=LiveEventResponse)

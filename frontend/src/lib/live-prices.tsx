@@ -16,22 +16,29 @@ import type { LiveEvent, LiveEventStatus } from "@/lib/types";
  * Live market prices and events for the whole app.
  *
  * Connects to `{NEXT_PUBLIC_WS_URL}/ws/markets/{tenantSlug}` and applies
- * `price_update`, `status_change`, and `new_event` messages from the live
- * event broadcaster. Legacy `price_tick` frames are still accepted.
+ * batched `batch_update` frames plus individual live event messages.
+ * Optimistic updates keep trading UI responsive before server confirmation.
  */
 
 export type FeedStatus = "connecting" | "live" | "simulated";
+
+interface OptimisticEntry {
+  yes: number;
+  expiresAt: number;
+}
 
 interface LivePricesContextValue {
   prices: Record<string, number>;
   events: LiveEvent[];
   status: FeedStatus;
   mergeEvents: (events: LiveEvent[]) => void;
+  optimisticUpdatePrice: (marketId: string, yes: number) => void;
 }
 
 const LivePricesContext = createContext<LivePricesContextValue | null>(null);
 
 const SIMULATOR_INTERVAL_MS = 1_800;
+const OPTIMISTIC_TTL_MS = 2_500;
 const clamp = (p: number) => Math.min(0.97, Math.max(0.03, p));
 
 function applyPriceToEvents(events: LiveEvent[], externalId: string, yes: number): LiveEvent[] {
@@ -56,6 +63,107 @@ function upsertEvent(events: LiveEvent[], incoming: LiveEvent): LiveEvent[] {
   return next;
 }
 
+function applyLiveMessage(
+  message: Record<string, unknown>,
+  setPrices: React.Dispatch<React.SetStateAction<Record<string, number>>>,
+  setEvents: React.Dispatch<React.SetStateAction<LiveEvent[]>>,
+  clearOptimistic: (marketId: string) => void,
+) {
+  if (message.type === "batch_update" && Array.isArray(message.updates)) {
+    for (const update of message.updates as Record<string, unknown>[]) {
+      applyLiveMessage(update, setPrices, setEvents, clearOptimistic);
+    }
+    return;
+  }
+
+  if (message.type === "price_tick" && typeof message.market_id === "string") {
+    const marketId = message.market_id;
+    const yes = clamp(Number(message.yes_price));
+    clearOptimistic(marketId);
+    setPrices((current) =>
+      marketId in current ? { ...current, [marketId]: yes } : current,
+    );
+    setEvents((current) => applyPriceToEvents(current, marketId, yes));
+    return;
+  }
+
+  if (message.type === "price_update" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const externalId = data.external_id as string | undefined;
+    const probabilities = data.probabilities as { yes?: number } | undefined;
+    const yes = clamp(Number(probabilities?.yes ?? 0.5));
+    const key = externalId ?? String(message.event_id);
+    clearOptimistic(key);
+    setPrices((current) => ({ ...current, [key]: yes }));
+    setEvents((current) =>
+      applyPriceToEvents(current, key, yes).map((item) =>
+        item.externalId === key || item.id === message.event_id
+          ? {
+              ...item,
+              yesPrice: yes,
+              probabilities: { yes, no: clamp(1 - yes) },
+              change24h: Number(data.change_24h ?? item.change24h),
+              source: (data.source as LiveEvent["source"]) ?? item.source,
+            }
+          : item,
+      ),
+    );
+    return;
+  }
+
+  if (message.type === "status_change" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const statusValue = data.status as LiveEventStatus;
+    setEvents((current) =>
+      current.map((item) =>
+        item.id === message.event_id || item.externalId === data.external_id
+          ? { ...item, status: statusValue }
+          : item,
+      ),
+    );
+    return;
+  }
+
+  if (message.type === "new_event" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const externalId = String(data.external_id ?? message.event_id);
+    const yes = clamp(Number((data.probabilities as { yes?: number } | undefined)?.yes ?? 0.5));
+
+    if (data.question) {
+      const incoming: LiveEvent = {
+        id: String(message.event_id),
+        externalId,
+        source: (data.source as LiveEvent["source"]) ?? "internal",
+        category: (data.category as LiveEvent["category"]) ?? "economics",
+        status: (data.status as LiveEventStatus) ?? "open",
+        question: String(data.question),
+        probabilities: { yes, no: clamp(1 - yes) },
+        yesPrice: yes,
+        volume: Number(data.volume ?? 0),
+        volume24h: Number(data.volume_24h ?? 0),
+        change24h: Number(data.change_24h ?? 0),
+        lastUpdated: new Date().toISOString(),
+      };
+      clearOptimistic(externalId);
+      setEvents((current) => upsertEvent(current, incoming));
+      setPrices((current) => ({ ...current, [externalId]: yes }));
+      return;
+    }
+
+    setEvents((current) =>
+      current.map((item) =>
+        item.id === message.event_id || item.externalId === externalId
+          ? {
+              ...item,
+              volume: Number(data.volume ?? item.volume),
+              volume24h: Number(data.volume_24h ?? item.volume24h),
+            }
+          : item,
+      ),
+    );
+  }
+}
+
 export function LivePricesProvider({
   initialPrices,
   initialEvents = [],
@@ -70,7 +178,39 @@ export function LivePricesProvider({
   const [prices, setPrices] = useState(initialPrices);
   const [events, setEvents] = useState<LiveEvent[]>(initialEvents);
   const [status, setStatus] = useState<FeedStatus>("connecting");
+  const [optimistic, setOptimistic] = useState<Record<string, OptimisticEntry>>({});
   const simulatorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingMessages = useRef<Record<string, unknown>[]>([]);
+  const flushScheduled = useRef(false);
+
+  const clearOptimistic = useCallback((marketId: string) => {
+    setOptimistic((current) => {
+      if (!(marketId in current)) return current;
+      const next = { ...current };
+      delete next[marketId];
+      return next;
+    });
+  }, []);
+
+  const flushPending = useCallback(() => {
+    flushScheduled.current = false;
+    const batch = pendingMessages.current.splice(0);
+    if (batch.length === 0) return;
+
+    for (const message of batch) {
+      applyLiveMessage(message, setPrices, setEvents, clearOptimistic);
+    }
+  }, [clearOptimistic]);
+
+  const queueMessage = useCallback(
+    (message: Record<string, unknown>) => {
+      pendingMessages.current.push(message);
+      if (flushScheduled.current) return;
+      flushScheduled.current = true;
+      requestAnimationFrame(flushPending);
+    },
+    [flushPending],
+  );
 
   const mergeEvents = useCallback((incoming: LiveEvent[]) => {
     setEvents((current) => {
@@ -87,6 +227,16 @@ export function LivePricesProvider({
       }
       return next;
     });
+  }, []);
+
+  const optimisticUpdatePrice = useCallback((marketId: string, yes: number) => {
+    const normalized = clamp(yes);
+    setOptimistic((current) => ({
+      ...current,
+      [marketId]: { yes: normalized, expiresAt: Date.now() + OPTIMISTIC_TTL_MS },
+    }));
+    setPrices((current) => ({ ...current, [marketId]: normalized }));
+    setEvents((current) => applyPriceToEvents(current, marketId, normalized));
   }, []);
 
   const startSimulator = useCallback(() => {
@@ -119,6 +269,22 @@ export function LivePricesProvider({
   }, []);
 
   useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setOptimistic((current) => {
+        const stale = Object.entries(current).filter(([, entry]) => entry.expiresAt <= now);
+        if (stale.length === 0) return current;
+        const next = { ...current };
+        for (const [marketId] of stale) {
+          delete next[marketId];
+        }
+        return next;
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const base = process.env.NEXT_PUBLIC_WS_URL;
     if (!base) {
       startSimulator();
@@ -145,90 +311,12 @@ export function LivePricesProvider({
 
     socket.onmessage = (event) => {
       try {
-        const message = JSON.parse(event.data as string);
-
-        if (message.type === "price_tick" && typeof message.market_id === "string") {
-          const yes = clamp(Number(message.yes_price));
-          setPrices((current) =>
-            message.market_id in current ? { ...current, [message.market_id]: yes } : current,
-          );
-          setEvents((current) => applyPriceToEvents(current, message.market_id, yes));
-        }
-
-        if (message.type === "price_update" && message.data) {
-          const externalId = message.data.external_id as string | undefined;
-          const probabilities = message.data.probabilities as { yes?: number } | undefined;
-          const yes = clamp(Number(probabilities?.yes ?? 0.5));
-          const key = externalId ?? message.event_id;
-          if (typeof key === "string") {
-            setPrices((current) => ({ ...current, [key]: yes }));
-            setEvents((current) =>
-              applyPriceToEvents(current, key, yes).map((item) =>
-                item.externalId === key || item.id === message.event_id
-                  ? {
-                      ...item,
-                      yesPrice: yes,
-                      probabilities: { yes, no: clamp(1 - yes) },
-                      change24h: Number(message.data.change_24h ?? item.change24h),
-                      source: (message.data.source as LiveEvent["source"]) ?? item.source,
-                    }
-                  : item,
-              ),
-            );
-          }
-        }
-
-        if (message.type === "status_change" && message.data) {
-          const statusValue = message.data.status as LiveEventStatus;
-          setEvents((current) =>
-            current.map((item) =>
-              item.id === message.event_id || item.externalId === message.data.external_id
-                ? { ...item, status: statusValue }
-                : item,
-            ),
-          );
-        }
-
-        if (message.type === "new_event" && message.data) {
-          const data = message.data as Record<string, unknown>;
-          const externalId = String(data.external_id ?? message.event_id);
-          const yes = clamp(Number((data.probabilities as { yes?: number } | undefined)?.yes ?? 0.5));
-
-          if (data.question) {
-            const incoming: LiveEvent = {
-              id: String(message.event_id),
-              externalId,
-              source: (data.source as LiveEvent["source"]) ?? "internal",
-              category: (data.category as LiveEvent["category"]) ?? "economics",
-              status: (data.status as LiveEventStatus) ?? "open",
-              question: String(data.question),
-              probabilities: { yes, no: clamp(1 - yes) },
-              yesPrice: yes,
-              volume: Number(data.volume ?? 0),
-              volume24h: Number(data.volume_24h ?? 0),
-              change24h: Number(data.change_24h ?? 0),
-              lastUpdated: new Date().toISOString(),
-            };
-            setEvents((current) => upsertEvent(current, incoming));
-            setPrices((current) => ({ ...current, [externalId]: yes }));
-          } else {
-            setEvents((current) =>
-              current.map((item) =>
-                item.id === message.event_id || item.externalId === externalId
-                  ? {
-                      ...item,
-                      volume: Number(data.volume ?? item.volume),
-                      volume24h: Number(data.volume_24h ?? item.volume24h),
-                    }
-                  : item,
-              ),
-            );
-          }
-        }
-
+        const message = JSON.parse(event.data as string) as Record<string, unknown>;
         if (message.type === "portfolio_update") {
           window.dispatchEvent(new CustomEvent("pp:portfolio-refresh"));
+          return;
         }
+        queueMessage(message);
       } catch {
         // Ignore malformed frames.
       }
@@ -249,11 +337,28 @@ export function LivePricesProvider({
         simulatorRef.current = null;
       }
     };
-  }, [tenantSlug, startSimulator]);
+  }, [tenantSlug, startSimulator, queueMessage]);
+
+  const mergedPrices = useMemo(() => {
+    const next = { ...prices };
+    const now = Date.now();
+    for (const [marketId, entry] of Object.entries(optimistic)) {
+      if (entry.expiresAt > now) {
+        next[marketId] = entry.yes;
+      }
+    }
+    return next;
+  }, [optimistic, prices]);
 
   const value = useMemo(
-    () => ({ prices, events, status, mergeEvents }),
-    [prices, events, status, mergeEvents],
+    () => ({
+      prices: mergedPrices,
+      events,
+      status,
+      mergeEvents,
+      optimisticUpdatePrice,
+    }),
+    [mergedPrices, events, status, mergeEvents, optimisticUpdatePrice],
   );
 
   return <LivePricesContext.Provider value={value}>{children}</LivePricesContext.Provider>;
@@ -271,6 +376,11 @@ export function useLivePrice(marketId: string, fallback: number): number {
 
 export function useLiveEvents(): LiveEvent[] {
   return useContext(LivePricesContext)?.events ?? [];
+}
+
+export function useOptimisticPriceUpdate() {
+  const context = useContext(LivePricesContext);
+  return context?.optimisticUpdatePrice ?? (() => undefined);
 }
 
 export function useLiveEventsContext() {

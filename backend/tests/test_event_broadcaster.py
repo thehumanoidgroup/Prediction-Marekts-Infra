@@ -91,7 +91,7 @@ async def test_subscribe_and_unsubscribe():
 
 @pytest.mark.asyncio
 async def test_broadcast_price_update_message_shape():
-    with patch("realtime.event_broadcaster.manager.broadcast", AsyncMock()) as broadcast:
+    with patch("realtime.event_broadcaster.batcher.enqueue", AsyncMock()) as enqueue:
         await broadcast_price_update(
             "evt-1",
             probabilities={"yes": 0.62, "no": 0.38},
@@ -102,9 +102,9 @@ async def test_broadcast_price_update_message_shape():
             tenant_slugs=["app"],
         )
 
-    broadcast.assert_awaited_once()
-    slug, payload = broadcast.await_args.args
-    rooms = broadcast.await_args.kwargs["rooms"]
+    enqueue.assert_awaited_once()
+    slug, payload = enqueue.await_args.args
+    rooms = enqueue.await_args.kwargs["rooms"]
     assert slug == "app"
     assert payload["type"] == "price_update"
     assert payload["event_id"] == "evt-1"
@@ -116,7 +116,7 @@ async def test_broadcast_price_update_message_shape():
 
 @pytest.mark.asyncio
 async def test_broadcast_status_change_message_shape():
-    with patch("realtime.event_broadcaster.manager.broadcast", AsyncMock()) as broadcast:
+    with patch("realtime.event_broadcaster.batcher.enqueue", AsyncMock()) as enqueue:
         await broadcast_status_change(
             "evt-2",
             status="resolved",
@@ -126,7 +126,7 @@ async def test_broadcast_status_change_message_shape():
             tenant_slugs=["app"],
         )
 
-    payload = broadcast.await_args.args[1]
+    payload = enqueue.await_args.args[1]
     assert payload["type"] == "status_change"
     assert payload["data"]["status"] == "resolved"
     assert payload["data"]["previous_status"] == "open"
@@ -134,7 +134,7 @@ async def test_broadcast_status_change_message_shape():
 
 @pytest.mark.asyncio
 async def test_broadcast_volume_update_message_shape():
-    with patch("realtime.event_broadcaster.manager.broadcast", AsyncMock()) as broadcast:
+    with patch("realtime.event_broadcaster.batcher.enqueue", AsyncMock()) as enqueue:
         await broadcast_volume_update(
             "evt-3",
             volume=125_000,
@@ -145,7 +145,7 @@ async def test_broadcast_volume_update_message_shape():
             tenant_slugs=["app"],
         )
 
-    payload = broadcast.await_args.args[1]
+    payload = enqueue.await_args.args[1]
     assert payload["type"] == "new_event"
     assert payload["data"]["volume"] == 125_000
     assert payload["data"]["volume_delta"] == 1_200
@@ -153,7 +153,7 @@ async def test_broadcast_volume_update_message_shape():
 
 @pytest.mark.asyncio
 async def test_broadcast_new_event_message_shape():
-    with patch("realtime.event_broadcaster.manager.broadcast", AsyncMock()) as broadcast:
+    with patch("realtime.event_broadcaster.batcher.enqueue", AsyncMock()) as enqueue:
         await broadcast_new_event(
             "evt-4",
             question="Will BTC reach 200K?",
@@ -165,7 +165,7 @@ async def test_broadcast_new_event_message_shape():
             tenant_slugs=["app"],
         )
 
-    payload = broadcast.await_args.args[1]
+    payload = enqueue.await_args.args[1]
     assert payload["type"] == "new_event"
     assert payload["data"]["question"] == "Will BTC reach 200K?"
     assert payload["data"]["source"] == "polymarket"

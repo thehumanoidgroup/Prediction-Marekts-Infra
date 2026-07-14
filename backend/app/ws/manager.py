@@ -2,18 +2,29 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import WebSocket
 
 from app.core.config import get_settings
+from app.ws.rate_limiter import rate_limiter
+from services.live_feed_analytics import analytics
 
 logger = logging.getLogger(__name__)
 
 CHANNEL_PREFIX = "pp:markets:"
 DEFAULT_ROOM = "all"
+
+
+@dataclass
+class SocketMeta:
+    tenant_slug: str
+    connected_at: float = field(default_factory=time.time)
+    messages_received: int = 0
 
 
 class ConnectionManager:
@@ -31,6 +42,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._connections: dict[str, set[WebSocket]] = defaultdict(set)
         self._socket_rooms: dict[WebSocket, set[str]] = {}
+        self._socket_meta: dict[WebSocket, SocketMeta] = {}
         self._lock = asyncio.Lock()
         self._redis: aioredis.Redis | None = None
         self._listener_task: asyncio.Task[None] | None = None
@@ -56,16 +68,48 @@ class ConnectionManager:
         if self._redis:
             await self._redis.aclose()
 
-    async def connect(self, tenant_slug: str, websocket: WebSocket) -> None:
+    async def connect(self, tenant_slug: str, websocket: WebSocket) -> bool:
+        """Accept a socket when within connection rate and capacity limits."""
+        settings = get_settings()
+
+        async with self._lock:
+            current = len(self._connections[tenant_slug])
+            if current >= settings.ws_max_connections_per_tenant:
+                return False
+
+        if not rate_limiter.allow_connection(tenant_slug):
+            return False
+
         await websocket.accept()
         async with self._lock:
             self._connections[tenant_slug].add(websocket)
             self._socket_rooms[websocket] = {DEFAULT_ROOM}
+            self._socket_meta[websocket] = SocketMeta(tenant_slug=tenant_slug)
+
+        analytics.record_connection(tenant_slug, connected=True)
+        return True
 
     async def disconnect(self, tenant_slug: str, websocket: WebSocket) -> None:
         async with self._lock:
+            had_socket = websocket in self._connections[tenant_slug]
             self._connections[tenant_slug].discard(websocket)
             self._socket_rooms.pop(websocket, None)
+            self._socket_meta.pop(websocket, None)
+
+        rate_limiter.clear_socket(websocket)
+        if had_socket:
+            analytics.record_connection(tenant_slug, connected=False)
+
+    async def register_message(self, websocket: WebSocket) -> bool:
+        """Track inbound client messages and enforce per-socket rate limits."""
+        if not rate_limiter.allow_message(websocket):
+            return False
+
+        async with self._lock:
+            meta = self._socket_meta.get(websocket)
+            if meta is not None:
+                meta.messages_received += 1
+        return True
 
     async def subscribe(self, websocket: WebSocket, rooms: list[str]) -> set[str]:
         """Add room subscriptions for a connected socket."""
@@ -87,6 +131,27 @@ class ConnectionManager:
 
     def subscriptions(self, websocket: WebSocket) -> set[str]:
         return set(self._socket_rooms.get(websocket, {DEFAULT_ROOM}))
+
+    async def connection_stats_async(self) -> dict[str, Any]:
+        async with self._lock:
+            tenants = {
+                slug: len(sockets) for slug, sockets in self._connections.items() if sockets
+            }
+            sockets = []
+            for socket, meta in self._socket_meta.items():
+                sockets.append(
+                    {
+                        "tenant_slug": meta.tenant_slug,
+                        "connected_at": meta.connected_at,
+                        "messages_received": meta.messages_received,
+                        "rooms": sorted(self._socket_rooms.get(socket, {DEFAULT_ROOM})),
+                    }
+                )
+        return {
+            "total_connections": sum(tenants.values()),
+            "connections_by_tenant": tenants,
+            "sockets": sockets,
+        }
 
     async def broadcast(
         self,

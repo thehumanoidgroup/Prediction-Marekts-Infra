@@ -9,6 +9,7 @@ const tabs = [
   { href: "/platform/firms", label: "All firms" },
   { href: "/platform/markets", label: "Global templates" },
   { href: "/platform/integrations", label: "Integrations" },
+  { href: "/platform/live-feed", label: "Live feed" },
 ];
 
 /** Horizontal sub-navigation for the platform owner area. */

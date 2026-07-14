@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { LiveEvent } from "@/lib/types";
 import { formatCompactUsd } from "@/lib/format";
+import { useLiveEventView } from "@/lib/hooks/use-live-event-view";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { LiveProbability } from "@/components/markets/live-price";
@@ -8,43 +11,50 @@ import { LiveProbabilityBar } from "@/components/markets/live-probability-bar";
 import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { cn } from "@/lib/utils";
 
-const categoryLabels: Record<LiveEvent["category"], string> = {
+const categoryLabels: Record<string, string> = {
   crypto: "Crypto",
   stocks: "Stocks",
   forex: "Forex",
   commodities: "Commodities",
   economics: "Economics",
   indices: "Indices",
+  sports: "Sports",
+  politics: "Politics",
 };
 
-const categoryAccent: Record<LiveEvent["category"], string> = {
+const categoryAccent: Record<string, string> = {
   crypto: "border-l-[#f59e0b]",
   stocks: "border-l-[#38bdf8]",
   forex: "border-l-[#a78bfa]",
   commodities: "border-l-[#f97316]",
   economics: "border-l-[#22c55e]",
   indices: "border-l-[#ec4899]",
+  sports: "border-l-[#ef4444]",
+  politics: "border-l-[#8b5cf6]",
 };
 
 export function LiveEventCard({ event }: { event: LiveEvent }) {
+  useLiveEventView(event);
+
   const up = event.change24h >= 0;
   const href =
     event.source === "polymarket"
       ? `/markets/${event.externalId}?source=polymarket`
       : `/markets/${event.externalId}`;
+  const accent = categoryAccent[event.category] ?? "border-l-accent";
 
   return (
     <Card
       className={cn(
         "group flex flex-col border-l-[3px] transition-all duration-200",
         "hover:border-edge-strong hover:shadow-[0_8px_32px_-12px_rgba(0,0,0,0.55)]",
-        categoryAccent[event.category],
+        accent,
       )}
     >
       <Link href={href} className="flex flex-1 flex-col p-4 pb-3 sm:p-5 sm:pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge>{categoryLabels[event.category]}</Badge>
+            <Badge>{categoryLabels[event.category] ?? event.category}</Badge>
             <MarketSourceBadge source={event.source} />
           </div>
           <div className="flex items-center gap-1.5">

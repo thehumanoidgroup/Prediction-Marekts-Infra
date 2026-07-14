@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, health, live_events, polymarket, tenants, trading, ws
+from app.api.routes import auth, health, live_events, platform_monitoring, polymarket, tenants, trading, ws
 from app.core.config import get_settings
 from app.db.seed import seed_database
 from app.db.session import SessionLocal, engine
@@ -12,6 +12,7 @@ from app.middleware.tenancy import TenantContextMiddleware
 from app.models import Base
 from app.ws.manager import manager
 from app.ws.ticker import start_ticker, stop_ticker
+from realtime.update_batcher import batcher
 from tasks.live_data_ingestion import start_live_data_ingestion, stop_live_data_ingestion
 
 logging.basicConfig(level=logging.INFO)
@@ -30,11 +31,13 @@ async def lifespan(app: FastAPI):
             await seed_database(db)
 
     await manager.startup()
+    await batcher.startup()
     ticker = start_ticker()
     ingestion = start_live_data_ingestion()
     yield
     await stop_live_data_ingestion(ingestion)
     await stop_ticker(ticker)
+    await batcher.shutdown()
     await manager.shutdown()
     await engine.dispose()
 
@@ -64,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(tenants.router, prefix="/api/v1")
     app.include_router(trading.router, prefix="/api/v1")
     app.include_router(live_events.router, prefix="/api/v1")
+    app.include_router(platform_monitoring.router, prefix="/api/v1")
     app.include_router(polymarket.router, prefix="/api")
     app.include_router(ws.router)
 

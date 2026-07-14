@@ -11,7 +11,7 @@ export type MarketCategory =
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
 /** Where a market's liquidity and pricing originate. */
-export type MarketSourceType = "internal" | "polymarket";
+export type MarketSourceType = "internal" | "polymarket" | "external";
 
 /** Trader UI filter for which market feeds to display. */
 export type MarketViewSource = MarketSourceType | "all";

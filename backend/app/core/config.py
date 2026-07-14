@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # Demo market ticker broadcast interval (seconds).
     ticker_interval_seconds: float = 2.0
 
+    # WebSocket limits and broadcast batching.
+    ws_max_connections_per_tenant: int = 500
+    ws_connection_rate_per_minute: int = 60
+    ws_message_rate_per_minute: int = 120
+    ws_broadcast_batch_ms: float = 300.0
+    ws_min_price_delta: float = 0.005
+
     # External live data ingestion (sports/politics/crypto polling).
     ingestion_enabled: bool = True
     ingestion_interval_seconds: float = 15.0

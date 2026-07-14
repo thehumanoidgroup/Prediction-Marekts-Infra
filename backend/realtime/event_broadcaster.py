@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Tenant
-from app.ws.manager import manager
+from realtime.update_batcher import batcher
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ async def _broadcast(
 
     slugs = await _active_tenant_slugs(tenant_slugs)
     for slug in slugs:
-        await manager.broadcast(slug, payload, rooms=rooms)
+        await batcher.enqueue(slug, payload, rooms=rooms)
 
 
 async def broadcast_price_update(

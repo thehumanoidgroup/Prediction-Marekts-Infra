@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { notifyPortfolioRefresh } from "@/lib/hooks/use-dashboard-data";
 import type { Outcome } from "@/lib/types";
-import { useLivePrice } from "@/lib/live-prices";
+import { useLivePrice, useOptimisticPriceUpdate } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ProbabilityBar } from "@/components/ui/probability-bar";
@@ -46,6 +46,7 @@ export function BetModal({
 }: BetModalProps) {
   const router = useRouter();
   const yesPrice = useLivePrice(marketId, initialYesPrice);
+  const optimisticUpdatePrice = useOptimisticPriceUpdate();
   const [outcome, setOutcome] = useState<Outcome>(initialOutcome);
   const [shares, setShares] = useState(250);
   const [pending, setPending] = useState(false);
@@ -76,6 +77,8 @@ export function BetModal({
   async function submit() {
     setPending(true);
     setError(null);
+    const fillYes = outcome === "yes" ? yesPrice : 1 - yesPrice;
+    optimisticUpdatePrice(marketId, fillYes);
     try {
       const response = await fetch("/api/orders", {
         method: "POST",
