@@ -39,3 +39,9 @@ class User(Base, UUIDTimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     tenant = relationship("Tenant", back_populates="users")
+    demo_account = relationship(
+        "TraderDemoAccount",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

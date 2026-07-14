@@ -104,11 +104,23 @@ async def get_firm_admin_user(
 
 
 async def get_trader_session(
+    db: Annotated[AsyncSession, Depends(get_db)],
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
     user: Annotated[User, Depends(get_trader_user)],
 ) -> TraderSession:
     """Active trading session for the resolved trader."""
-    return get_trading_store().get_session(tenant.slug, str(user.id), tenant.program or {})
+    from services.account_provisioning import get_or_provision_trader_demo_account
+
+    demo_account = await get_or_provision_trader_demo_account(db, user=user, tenant=tenant)
+    program = demo_account.to_program_dict()
+    return get_trading_store().get_session(
+        tenant.slug,
+        str(user.id),
+        program,
+        provider=demo_account.provider.value,
+        kalshi_market_tickers=demo_account.effective_kalshi_tickers(),
+        demo_account_id=demo_account.id,
+    )
 
 
 def require_roles(*roles: UserRole):

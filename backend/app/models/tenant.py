@@ -61,3 +61,12 @@ class Tenant(Base, UUIDTimestampMixin):
     program: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    challenge_configs = relationship(
+        "ChallengeConfig", back_populates="tenant", cascade="all, delete-orphan"
+    )
+    prop_firm_accounts = relationship(
+        "PropFirmAccount", back_populates="tenant", cascade="all, delete-orphan"
+    )
+    trader_demo_accounts = relationship(
+        "TraderDemoAccount", back_populates="tenant", cascade="all, delete-orphan"
+    )

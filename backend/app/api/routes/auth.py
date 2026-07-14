@@ -37,6 +37,11 @@ async def register(
         role=UserRole.TRADER,
     )
     db.add(user)
+    await db.flush()
+
+    from services.account_provisioning import provision_trader_demo_account
+
+    await provision_trader_demo_account(db, user=user, tenant=tenant)
     await db.commit()
     await db.refresh(user)
 

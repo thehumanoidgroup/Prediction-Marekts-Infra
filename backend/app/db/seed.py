@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models import Tenant, User, UserRole
+from services.account_provisioning import ensure_tenant_account_catalog, provision_trader_demo_account
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ async def seed_database(db: AsyncSession) -> None:
         db.add(tenant)
         await db.flush()
 
+        include_kalshi = tenant.slug == "apex"
+        await ensure_tenant_account_catalog(db, tenant, include_kalshi=include_kalshi)
+
         db.add_all(
             [
                 User(
@@ -125,6 +129,34 @@ async def seed_database(db: AsyncSession) -> None:
                     role=UserRole.PROP_FIRM_ADMIN,
                 ),
             ]
+        )
+        await db.flush()
+
+        trader_result = await db.execute(
+            select(User).where(
+                User.tenant_id == tenant.id,
+                User.email == f"trader@{tenant.slug}.proppredict.com",
+            )
+        )
+        trader = trader_result.scalar_one()
+
+        product = None
+        if include_kalshi:
+            from app.models import PropFirmAccount
+
+            kalshi_product = await db.execute(
+                select(PropFirmAccount).where(
+                    PropFirmAccount.tenant_id == tenant.id,
+                    PropFirmAccount.slug == "kalshi",
+                )
+            )
+            product = kalshi_product.scalar_one_or_none()
+
+        await provision_trader_demo_account(
+            db,
+            user=trader,
+            tenant=tenant,
+            prop_firm_account=product,
         )
 
     first = await db.execute(select(Tenant).where(Tenant.slug == "app"))

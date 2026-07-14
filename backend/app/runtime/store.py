@@ -69,6 +69,9 @@ class TraderSession:
     user_id: str
     bankroll: VirtualBankroll
     risk: RiskEngine
+    provider: str = "internal"
+    kalshi_market_tickers: list[str] = field(default_factory=list)
+    demo_account_id: str | None = None
     journal: list[JournalRecord] = field(default_factory=list)
     equity_curve: list[dict[str, float | int]] = field(default_factory=list)
     daily_pnl: float = 0.0
@@ -149,6 +152,10 @@ class TradingStore:
         tenant_slug: str,
         user_id: str,
         program: dict,
+        *,
+        provider: str = "internal",
+        kalshi_market_tickers: list[str] | None = None,
+        demo_account_id: str | None = None,
     ) -> TraderSession:
         key = (tenant_slug, user_id)
         with self._lock:
@@ -156,7 +163,7 @@ class TradingStore:
                 return self._sessions[key]
 
             sizes = program.get("account_sizes") or [25_000]
-            starting = float(sizes[min(1, len(sizes) - 1)])
+            starting = float(program.get("starting_balance") or sizes[min(1, len(sizes) - 1)])
             limits = RiskLimits(
                 starting_balance=starting,
                 profit_target_pct=float(program.get("profit_target_pct", 10)),
@@ -165,6 +172,7 @@ class TradingStore:
                 drawdown_mode=DrawdownMode(program.get("drawdown_mode", "static")),
                 max_stake_per_order=float(program.get("max_stake_per_order", 2500)),
                 max_exposure_per_market=float(program.get("max_exposure_per_market", 5000)),
+                max_total_exposure=program.get("max_total_exposure"),
                 min_trading_days=int(program.get("min_trading_days", 10)),
             )
             bankroll = VirtualBankroll(starting_balance=starting)
@@ -174,6 +182,9 @@ class TradingStore:
                 user_id=user_id,
                 bankroll=bankroll,
                 risk=risk,
+                provider=provider,
+                kalshi_market_tickers=list(kalshi_market_tickers or []),
+                demo_account_id=demo_account_id,
                 day_open_equity=starting,
             )
             # Seed equity curve with mild upward bias (30 points)
