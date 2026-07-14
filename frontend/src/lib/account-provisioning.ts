@@ -52,8 +52,11 @@ export interface ModelTypePreset {
 }
 
 export interface ProvisionResult {
+  status: "created";
+  message: string;
   user_id: string;
   account_id: string;
+  trader_demo_account_id: string;
   sold_record_id: string;
   email: string;
   display_name: string;
@@ -63,6 +66,7 @@ export interface ProvisionResult {
   created_user: boolean;
   email_sent: boolean;
   credentials_generated: boolean;
+  kalshi_live_integration_enabled: boolean;
   kalshi_market_tickers: string[];
   temporary_password: string | null;
   applied_rules: ChallengeRules;

@@ -99,6 +99,9 @@ class WebhookProvisionRequest(BaseModel):
     provider: ProviderName = "kalshi"
     account_size: int = Field(25_000, ge=10_000, le=2_000_000)
     display_name: str | None = None
+    model_type: ModelType = "1step"
+    template_config_id: str | None = None
+    challenge_rules: ChallengeRulesInput | None = None
     external_order_id: str | None = None
     kalshi_categories: list[str] | None = None
     metadata: dict[str, Any] | None = None
@@ -107,8 +110,11 @@ class WebhookProvisionRequest(BaseModel):
 class ProvisionAccountResponse(BaseModel):
     """Outcome returned to admins and webhook callers."""
 
+    status: Literal["created"] = "created"
+    message: str
     user_id: str
     account_id: str
+    trader_demo_account_id: str
     sold_record_id: str
     email: str
     display_name: str
@@ -118,6 +124,7 @@ class ProvisionAccountResponse(BaseModel):
     created_user: bool
     email_sent: bool
     credentials_generated: bool
+    kalshi_live_integration_enabled: bool
     kalshi_market_tickers: list[str]
     temporary_password: str | None = None
     applied_rules: ChallengeRulesPreview

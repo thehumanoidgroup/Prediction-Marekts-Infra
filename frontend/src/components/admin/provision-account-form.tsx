@@ -1,9 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import {
+  ACCOUNT_SIZES,
+  MODEL_TYPES,
+  type ChallengeRulesInput,
+  type ModelType,
+  type ProvisionResult,
+} from "@/lib/account-provisioning";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
-const ACCOUNT_SIZES = [10_000, 25_000, 50_000, 100_000] as const;
 const PROVIDERS = ["internal", "kalshi", "polymarket"] as const;
 
 /** Firm admin form to manually issue an evaluation account. */
@@ -12,13 +19,17 @@ export function ProvisionAccountForm() {
   const [displayName, setDisplayName] = useState("");
   const [provider, setProvider] = useState<(typeof PROVIDERS)[number]>("kalshi");
   const [accountSize, setAccountSize] = useState<number>(25_000);
+  const [modelType, setModelType] = useState<ModelType>("1step");
+  const [customRules, setCustomRules] = useState<ChallengeRulesInput>({});
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [result, setResult] = useState<ProvisionResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
-    setMessage(null);
+    setError(null);
+    setResult(null);
     try {
       const response = await fetch("/api/admin/accounts/provision", {
         method: "POST",
@@ -28,6 +39,8 @@ export function ProvisionAccountForm() {
           display_name: displayName || undefined,
           provider,
           account_size: accountSize,
+          model_type: modelType,
+          challenge_rules: Object.keys(customRules).length ? customRules : undefined,
           send_credentials_email: true,
         }),
       });
@@ -35,19 +48,11 @@ export function ProvisionAccountForm() {
       if (!response.ok) {
         throw new Error(data.detail ?? data.error ?? "Provisioning failed");
       }
-      setMessage({
-        ok: true,
-        text: `Account issued to ${data.email} (${data.provider}, ${data.account_size / 1000}K)${
-          data.temporary_password ? " — credentials emailed" : ""
-        }`,
-      });
+      setResult(data as ProvisionResult);
       setEmail("");
       setDisplayName("");
     } catch (err) {
-      setMessage({
-        ok: false,
-        text: err instanceof Error ? err.message : "Could not provision account",
-      });
+      setError(err instanceof Error ? err.message : "Could not provision account");
     } finally {
       setLoading(false);
     }
@@ -58,7 +63,7 @@ export function ProvisionAccountForm() {
       <div>
         <h3 className="text-sm font-semibold">Issue evaluation account</h3>
         <p className="text-xs text-muted">
-          Provision a Kalshi or internal demo account for a new or existing trader.
+          Provision a Kalshi-linked or internal demo account with optional challenge rule overrides.
         </p>
       </div>
 
@@ -111,11 +116,54 @@ export function ProvisionAccountForm() {
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted">Model type</span>
+          <select
+            value={modelType}
+            onChange={(e) => setModelType(e.target.value as ModelType)}
+            className="h-9 rounded-lg border border-edge bg-surface px-3 text-sm"
+          >
+            {MODEL_TYPES.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted">Profit target % (optional)</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={customRules.profit_target_pct ?? ""}
+            onChange={(e) =>
+              setCustomRules((rules) => ({
+                ...rules,
+                profit_target_pct: e.target.valueAsNumber || undefined,
+              }))
+            }
+            className="h-9 rounded-lg border border-edge bg-surface px-3 text-sm"
+          />
+        </label>
       </div>
 
-      {message && (
-        <p className={`text-sm ${message.ok ? "text-up" : "text-down"}`}>{message.text}</p>
-      )}
+      {error ? <p className="text-sm text-down">{error}</p> : null}
+
+      {result ? (
+        <div className="rounded-lg border border-up/30 bg-up-soft/40 p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-up">{result.message}</span>
+            <Badge tone="accent">{result.provider}</Badge>
+          </div>
+          <p className="mt-2 font-mono text-xs text-muted">Account ID: {result.account_id}</p>
+          {result.kalshi_live_integration_enabled ? (
+            <p className="mt-1 text-xs text-muted">
+              Kalshi live feed enabled ({result.kalshi_market_tickers.length} markets)
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div>
         <Button type="submit" disabled={loading}>

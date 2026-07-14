@@ -55,6 +55,7 @@ export function FirmSoldAccountsTable({ refreshKey }: { refreshKey?: number }) {
           <tr className="border-b border-edge text-left text-[11px] uppercase tracking-wide text-faint">
             <th className="pb-2 pr-4 font-medium">Issued</th>
             <th className="pb-2 pr-4 font-medium">Trader</th>
+            <th className="pb-2 pr-4 font-medium">Provider</th>
             <th className="pb-2 pr-4 font-medium">Model</th>
             <th className="tabular pb-2 pr-4 text-right font-medium">Size</th>
             <th className="pb-2 pr-4 font-medium">Email</th>
@@ -69,6 +70,9 @@ export function FirmSoldAccountsTable({ refreshKey }: { refreshKey?: number }) {
               <td className="py-3 pr-4">
                 <div className="font-medium">{row.trader_display_name}</div>
                 <div className="text-xs text-faint">{row.trader_email}</div>
+              </td>
+              <td className="py-3 pr-4">
+                <Badge tone={row.provider === "kalshi" ? "accent" : "up"}>{row.provider}</Badge>
               </td>
               <td className="py-3 pr-4">
                 <Badge tone="accent">{row.model_type}</Badge>

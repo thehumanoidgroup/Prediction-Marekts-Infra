@@ -58,11 +58,29 @@ function IssuanceSuccess({
               {result.display_name} · {result.email}
             </p>
           </div>
-          <Badge tone="up">Kalshi</Badge>
+          <Badge tone={result.provider === "kalshi" ? "accent" : "up"}>
+            {result.provider}
+          </Badge>
         </div>
       </div>
 
       <dl className="grid gap-2 rounded-xl border border-edge bg-surface-2 p-4 text-xs sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <dt className="text-muted">Account ID</dt>
+          <dd className="mt-1 rounded-md bg-surface px-2 py-1 font-mono text-[11px]">
+            {result.account_id}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted">Provider</dt>
+          <dd className="font-semibold capitalize">{result.provider}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Live Kalshi feed</dt>
+          <dd className="font-semibold">
+            {result.kalshi_live_integration_enabled ? "Enabled" : "—"}
+          </dd>
+        </div>
         <div>
           <dt className="text-muted">Account size</dt>
           <dd className="tabular font-semibold">{formatCompactUsd(result.account_size)}</dd>

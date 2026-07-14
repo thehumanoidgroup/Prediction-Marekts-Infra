@@ -34,18 +34,28 @@ router = APIRouter(tags=["account-provisioning"])
 
 
 def _to_provision_response(result) -> ProvisionAccountResponse:
+    provider = result.account.provider.value
+    kalshi_enabled = provider == "kalshi" and bool(result.kalshi_market_tickers)
+    message = (
+        f"Kalshi evaluation account {result.account.id} issued to {result.user.email}"
+        if provider == "kalshi"
+        else f"Evaluation account {result.account.id} issued to {result.user.email}"
+    )
     return ProvisionAccountResponse(
+        message=message,
         user_id=result.user.id,
         account_id=result.account.id,
+        trader_demo_account_id=result.account.id,
         sold_record_id=result.sold_record.id,
         email=result.user.email,
         display_name=result.user.display_name,
-        provider=result.account.provider.value,
+        provider=provider,
         account_size=result.account.starting_balance,
         model_type=result.account.model_type,
         created_user=result.created_user,
         email_sent=result.email_sent,
         credentials_generated=bool(result.temporary_password),
+        kalshi_live_integration_enabled=kalshi_enabled,
         kalshi_market_tickers=result.kalshi_market_tickers,
         temporary_password=result.temporary_password,
         applied_rules=ChallengeRulesPreview.model_validate(result.applied_rules),
@@ -193,6 +203,7 @@ async def webhook_provision_account(
         if not x_webhook_secret or x_webhook_secret != settings.webhook_secret:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
 
+    overrides = body.challenge_rules.model_dump(exclude_none=True) if body.challenge_rules else None
     result = await provision_new_account(
         db,
         tenant=tenant,
@@ -206,6 +217,9 @@ async def webhook_provision_account(
         metadata=body.metadata,
         replace_existing=True,
         send_credentials_email=True,
+        model_type=body.model_type,
+        template_config_id=body.template_config_id,
+        challenge_rules=overrides,
     )
     await db.commit()
     return _to_provision_response(result)
