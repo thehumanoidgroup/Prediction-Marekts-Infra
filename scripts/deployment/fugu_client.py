@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -19,6 +20,29 @@ import httpx
 DEFAULT_BASE_URL = "https://api.sakana.ai/v1"
 DEFAULT_MODEL = "fugu"
 DEFAULT_TIMEOUT_SECONDS = 180.0
+_ENV_LOADED = False
+
+
+def _load_dotenv() -> None:
+    """Load ``.env`` from the repo root when present (local dev fallback)."""
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
+
+    repo_root = Path(__file__).resolve().parents[2]
+    env_path = repo_root / ".env"
+    if not env_path.is_file():
+        return
+
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
 
 
 class FuguError(Exception):
@@ -50,6 +74,7 @@ class FuguClient:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         reasoning_effort: Literal["high", "xhigh", "max"] = "high",
     ) -> None:
+        _load_dotenv()
         self.api_key = api_key or os.environ.get("SAKANA_API_KEY")
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -82,7 +107,8 @@ class FuguClient:
     def _auth_headers(self) -> dict[str, str]:
         if not self.is_configured:
             raise FuguAuthError(
-                "SAKANA_API_KEY is not set. Export it or add it to your .env file."
+                "SAKANA_API_KEY is not set. Add it in Cursor → Cloud Agents → Secrets "
+                "(exact name: SAKANA_API_KEY), restart the agent, or add it to .env at the repo root."
             )
         return {
             "Authorization": f"Bearer {self.api_key}",
