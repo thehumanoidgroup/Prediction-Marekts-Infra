@@ -1,0 +1,41 @@
+import { NextRequest, NextResponse } from "next/server";
+import { placeOrder } from "@/services";
+import type { Outcome } from "@/types";
+import { getTenantFromRequest } from "@/lib/tenant-request";
+
+export async function POST(request: NextRequest) {
+  const tenant = getTenantFromRequest(request);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { marketId, outcome, side, shares } = (body ?? {}) as Record<string, unknown>;
+  if (
+    typeof marketId !== "string" ||
+    (outcome !== "yes" && outcome !== "no") ||
+    (side !== "buy" && side !== "sell") ||
+    typeof shares !== "number"
+  ) {
+    return NextResponse.json(
+      { error: "Expected { marketId, outcome: yes|no, side: buy|sell, shares: number }" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const result = placeOrder(tenant.id, {
+      marketId,
+      outcome: outcome as Outcome,
+      side,
+      shares,
+    });
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Order failed";
+    return NextResponse.json({ error: message }, { status: 422 });
+  }
+}
