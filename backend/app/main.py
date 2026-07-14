@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, health, kalshi, live_events, platform_monitoring, polymarket, tenants, trading, ws
+from app.api.routes import account_provisioning, auth, health, kalshi, live_events, platform_monitoring, polymarket, tenants, trading, ws
 from app.core.config import get_settings
 from app.db.seed import seed_database
 from app.db.session import SessionLocal, engine
@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(trading.router, prefix="/api/v1")
     app.include_router(live_events.router, prefix="/api/v1")
     app.include_router(platform_monitoring.router, prefix="/api/v1")
+    app.include_router(account_provisioning.router, prefix="/api/v1")
     app.include_router(polymarket.router, prefix="/api")
     app.include_router(kalshi.router, prefix="/api")
     app.include_router(ws.router)

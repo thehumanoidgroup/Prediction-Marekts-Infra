@@ -3,28 +3,64 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+import secrets
+import string
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.security import hash_password
+from app.engine.risk import ChallengeStatus
 from app.models import (
     ChallengeConfig,
+    IssuanceSource,
     MarketProvider,
     PropFirmAccount,
+    SoldAccount,
     Tenant,
     TraderDemoAccount,
     User,
+    UserRole,
 )
 from app.models.tenant import DEFAULT_PROGRAM
+from integrations.kalshi import KalshiClient
+from integrations.kalshi.kalshi_service import normalize_kalshi_market
+from services.email_service import AccountCredentialsEmail, send_account_credentials_email
 
 logger = logging.getLogger(__name__)
+
+ProviderName = Literal["internal", "polymarket", "kalshi"]
 
 DEFAULT_KALSHI_TICKERS = [
     "KXBTC-25DEC31",
     "KXFED-25DEC31",
 ]
+
+DEFAULT_KALSHI_CATEGORIES = ("crypto", "economics", "stocks")
+
+_KALSHI_CATEGORY_PATTERNS: dict[str, re.Pattern[str]] = {
+    "crypto": re.compile(r"\b(btc|bitcoin|eth|ethereum|crypto|solana|xrp)\b", re.I),
+    "economics": re.compile(r"\b(fed|cpi|inflation|gdp|election|president|rate)\b", re.I),
+    "stocks": re.compile(r"\b(nvda|aapl|tsla|s&p|nasdaq|stock|equity)\b", re.I),
+    "commodities": re.compile(r"\b(oil|gold|crude|weather|temperature)\b", re.I),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionResult:
+    """Outcome of :func:`provision_new_account`."""
+
+    user: User
+    account: TraderDemoAccount
+    sold_record: SoldAccount
+    created_user: bool
+    temporary_password: str | None
+    email_sent: bool
+    kalshi_market_tickers: list[str]
 
 
 def _program_to_challenge_fields(program: dict[str, Any]) -> dict[str, Any]:
@@ -43,7 +79,115 @@ def _program_to_challenge_fields(program: dict[str, Any]) -> dict[str, Any]:
         "max_total_exposure": program.get("max_total_exposure"),
         "challenge_duration_days": int(program.get("challenge_duration_days", 60)),
         "min_trading_days": int(program.get("min_trading_days", 10)),
+        "model_type": str(program.get("model_type", "evaluation")),
+        "min_consistency_score": program.get("min_consistency_score"),
     }
+
+
+def _parse_provider(provider: str | MarketProvider) -> MarketProvider:
+    if isinstance(provider, MarketProvider):
+        return provider
+    try:
+        return MarketProvider(provider.lower())
+    except ValueError as exc:
+        raise ValueError(f"Unsupported provider: {provider!r}") from exc
+
+
+def _generate_temporary_password(length: int = 14) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _kalshi_market_category(raw: dict[str, Any]) -> str:
+    normalized = normalize_kalshi_market(
+        {
+            "ticker": raw.get("ticker") or "UNKNOWN",
+            "title": raw.get("title") or "",
+            "event_ticker": raw.get("event_ticker"),
+            "series_ticker": raw.get("series_ticker"),
+            "status": raw.get("status") or "active",
+            "yes_bid_dollars": raw.get("yes_bid_dollars"),
+            "yes_ask_dollars": raw.get("yes_ask_dollars"),
+            "last_price_dollars": raw.get("last_price_dollars"),
+            "volume_fp": raw.get("volume_fp") or raw.get("volume_24h_fp"),
+            "close_time": raw.get("close_time"),
+        }
+    )
+    return str(normalized.get("category") or "economics")
+
+
+def _market_matches_categories(raw: dict[str, Any], categories: set[str]) -> bool:
+    if not categories:
+        return True
+    category = _kalshi_market_category(raw)
+    if category in categories:
+        return True
+    haystack = " ".join(
+        [
+            str(raw.get("title") or ""),
+            str(raw.get("ticker") or ""),
+            str(raw.get("event_ticker") or ""),
+        ]
+    )
+    for name in categories:
+        pattern = _KALSHI_CATEGORY_PATTERNS.get(name)
+        if pattern and pattern.search(haystack):
+            return True
+    return False
+
+
+async def fetch_kalshi_live_markets(
+    *,
+    categories: list[str] | None = None,
+    max_per_category: int = 5,
+    max_total: int = 20,
+) -> list[str]:
+    """Fetch top open Kalshi market tickers, optionally filtered by category."""
+    selected_categories = {c.lower() for c in (categories or DEFAULT_KALSHI_CATEGORIES)}
+    per_category: dict[str, list[tuple[float, str]]] = {cat: [] for cat in selected_categories}
+    fallback: list[tuple[float, str]] = []
+
+    client = KalshiClient.from_settings()
+    try:
+        async for market in client.iter_markets(status="open", max_pages=5, limit=200):
+            ticker = str(market.get("ticker") or "").strip()
+            if not ticker:
+                continue
+            volume = float(market.get("volume_24h_fp") or market.get("volume_fp") or 0.0)
+            category = _kalshi_market_category(market)
+            if category in per_category and len(per_category[category]) < max_per_category:
+                per_category[category].append((volume, ticker))
+            elif _market_matches_categories(market, selected_categories):
+                for cat in selected_categories:
+                    if len(per_category[cat]) < max_per_category:
+                        per_category[cat].append((volume, ticker))
+                        break
+            else:
+                fallback.append((volume, ticker))
+    finally:
+        await client.aclose()
+
+    tickers: list[str] = []
+    for cat in selected_categories:
+        ranked = sorted(per_category[cat], key=lambda item: item[0], reverse=True)
+        for _, ticker in ranked:
+            if ticker not in tickers:
+                tickers.append(ticker)
+            if len(tickers) >= max_total:
+                return tickers
+
+    for _, ticker in sorted(fallback, key=lambda item: item[0], reverse=True):
+        if ticker not in tickers:
+            tickers.append(ticker)
+        if len(tickers) >= max_total:
+            break
+
+    if not tickers:
+        logger.warning("Kalshi API returned no markets — using default ticker allowlist")
+        return list(DEFAULT_KALSHI_TICKERS)
+
+    logger.info("Fetched %s Kalshi tickers for provisioning", len(tickers))
+    return tickers
 
 
 async def ensure_tenant_account_catalog(
@@ -63,6 +207,8 @@ async def ensure_tenant_account_catalog(
     )
     existing = result.scalar_one_or_none()
     if existing is not None:
+        if include_kalshi:
+            await _ensure_kalshi_product(db, tenant)
         return existing
 
     program = {**DEFAULT_PROGRAM, **(tenant.program or {})}
@@ -88,35 +234,56 @@ async def ensure_tenant_account_catalog(
     db.add(internal_product)
 
     if include_kalshi:
-        kalshi_program = _program_to_challenge_fields(program)
-        kalshi_config = ChallengeConfig(
-            tenant_id=tenant.id,
-            name="Kalshi Evaluation",
-            provider=MarketProvider.KALSHI,
-            kalshi_market_tickers=list(DEFAULT_KALSHI_TICKERS),
-            **kalshi_program,
-        )
-        db.add(kalshi_config)
-        await db.flush()
-
-        db.add(
-            PropFirmAccount(
-                tenant_id=tenant.id,
-                challenge_config_id=kalshi_config.id,
-                slug="kalshi",
-                label="Kalshi Evaluation",
-                description="Trade linked Kalshi prediction markets.",
-                provider=MarketProvider.KALSHI,
-                kalshi_market_tickers=list(DEFAULT_KALSHI_TICKERS),
-                is_default=False,
-                is_active=True,
-            )
-        )
+        await _ensure_kalshi_product(db, tenant, program_fields=_program_to_challenge_fields(program))
 
     await db.flush()
     await db.refresh(internal_product, attribute_names=["challenge_config"])
     logger.info("Provisioned account catalog for tenant %s", tenant.slug)
     return internal_product
+
+
+async def _ensure_kalshi_product(
+    db: AsyncSession,
+    tenant: Tenant,
+    *,
+    program_fields: dict[str, Any] | None = None,
+) -> PropFirmAccount | None:
+    result = await db.execute(
+        select(PropFirmAccount).where(
+            PropFirmAccount.tenant_id == tenant.id,
+            PropFirmAccount.slug == "kalshi",
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        return None
+
+    fields = program_fields or _program_to_challenge_fields(
+        {**DEFAULT_PROGRAM, **(tenant.program or {})}
+    )
+    kalshi_config = ChallengeConfig(
+        tenant_id=tenant.id,
+        name="Kalshi Evaluation",
+        provider=MarketProvider.KALSHI,
+        kalshi_market_tickers=list(DEFAULT_KALSHI_TICKERS),
+        **fields,
+    )
+    db.add(kalshi_config)
+    await db.flush()
+
+    product = PropFirmAccount(
+        tenant_id=tenant.id,
+        challenge_config_id=kalshi_config.id,
+        slug="kalshi",
+        label="Kalshi Evaluation",
+        description="Trade linked Kalshi prediction markets.",
+        provider=MarketProvider.KALSHI,
+        kalshi_market_tickers=list(DEFAULT_KALSHI_TICKERS),
+        is_default=False,
+        is_active=True,
+    )
+    db.add(product)
+    await db.flush()
+    return product
 
 
 async def get_default_prop_firm_account(
@@ -130,9 +297,7 @@ async def get_default_prop_firm_account(
             PropFirmAccount.is_default.is_(True),
             PropFirmAccount.is_active.is_(True),
         )
-        .options(
-            selectinload(PropFirmAccount.challenge_config),
-        )
+        .options(selectinload(PropFirmAccount.challenge_config))
     )
     return result.scalar_one_or_none()
 
@@ -154,6 +319,24 @@ async def get_prop_firm_account_by_slug(
     return result.scalar_one_or_none()
 
 
+async def get_prop_firm_account_for_provider(
+    db: AsyncSession,
+    tenant_id: str,
+    provider: MarketProvider,
+) -> PropFirmAccount | None:
+    result = await db.execute(
+        select(PropFirmAccount)
+        .where(
+            PropFirmAccount.tenant_id == tenant_id,
+            PropFirmAccount.provider == provider,
+            PropFirmAccount.is_active.is_(True),
+        )
+        .order_by(PropFirmAccount.is_default.desc())
+        .options(selectinload(PropFirmAccount.challenge_config))
+    )
+    return result.scalars().first()
+
+
 def _resolve_provider(
     prop_firm_account: PropFirmAccount,
     *,
@@ -164,15 +347,46 @@ def _resolve_provider(
     return prop_firm_account.provider or prop_firm_account.challenge_config.provider
 
 
-async def provision_trader_demo_account(
+async def _find_or_create_user(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    email: str,
+    display_name: str | None,
+    generate_credentials: bool,
+) -> tuple[User, bool, str | None]:
+    normalized_email = email.strip().lower()
+    result = await db.execute(
+        select(User).where(User.tenant_id == tenant.id, User.email == normalized_email)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing, False, None
+
+    temp_password = _generate_temporary_password() if generate_credentials else None
+    user = User(
+        tenant_id=tenant.id,
+        email=normalized_email,
+        display_name=display_name or normalized_email.split("@")[0].title(),
+        hashed_password=hash_password(temp_password or _generate_temporary_password()),
+        role=UserRole.TRADER,
+    )
+    db.add(user)
+    await db.flush()
+    return user, True, temp_password
+
+
+async def _upsert_trader_demo_account(
     db: AsyncSession,
     *,
     user: User,
     tenant: Tenant,
-    prop_firm_account: PropFirmAccount | None = None,
-    provider: MarketProvider | None = None,
+    product: PropFirmAccount,
+    provider: MarketProvider,
+    account_size: float,
+    kalshi_tickers: list[str] | None,
+    replace_existing: bool,
 ) -> TraderDemoAccount:
-    """Create a trader demo account from the firm's default (or selected) product."""
     result = await db.execute(
         select(TraderDemoAccount)
         .where(TraderDemoAccount.tenant_id == tenant.id, TraderDemoAccount.user_id == user.id)
@@ -184,12 +398,136 @@ async def provision_trader_demo_account(
         )
     )
     existing = result.scalar_one_or_none()
-    if existing is not None:
+    if existing is not None and not replace_existing:
         return existing
 
-    product = prop_firm_account or await get_default_prop_firm_account(db, tenant.id)
+    config = product.challenge_config
+    model_type = config.model_type
+    ticker_list = list(kalshi_tickers) if kalshi_tickers else None
+
+    if existing is not None:
+        existing.prop_firm_account_id = product.id
+        existing.challenge_config_id = product.challenge_config_id
+        existing.provider = provider
+        existing.starting_balance = account_size
+        existing.virtual_balance = account_size
+        existing.model_type = model_type
+        existing.kalshi_market_tickers = ticker_list
+        existing.status = ChallengeStatus.ACTIVE
+        account = existing
+    else:
+        account = TraderDemoAccount(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            prop_firm_account_id=product.id,
+            challenge_config_id=product.challenge_config_id,
+            provider=provider,
+            starting_balance=account_size,
+            virtual_balance=account_size,
+            model_type=model_type,
+            kalshi_market_tickers=ticker_list,
+            status=ChallengeStatus.ACTIVE,
+        )
+        db.add(account)
+
+    await db.flush()
+    await db.refresh(account, attribute_names=["challenge_config", "prop_firm_account"])
+    return account
+
+
+async def _log_sold_account(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    user: User,
+    account: TraderDemoAccount,
+    provider: MarketProvider,
+    issuance_source: IssuanceSource,
+    account_size: float,
+    model_type: str,
+    kalshi_tickers: list[str],
+    credentials_generated: bool,
+    email_sent: bool,
+    issued_by_user_id: str | None,
+    external_order_id: str | None,
+    metadata: dict[str, Any] | None,
+) -> SoldAccount:
+    record = SoldAccount(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        trader_demo_account_id=account.id,
+        provider=provider,
+        issuance_source=issuance_source,
+        account_size=account_size,
+        model_type=model_type,
+        trader_email=user.email,
+        trader_display_name=user.display_name,
+        external_order_id=external_order_id,
+        kalshi_market_tickers=kalshi_tickers or None,
+        credentials_generated=credentials_generated,
+        email_sent=email_sent,
+        issued_by_user_id=issued_by_user_id,
+        metadata_json=metadata,
+    )
+    db.add(record)
+    await db.flush()
+    logger.info(
+        "Sold account logged id=%s tenant=%s provider=%s source=%s email=%s size=%s",
+        record.id,
+        tenant.slug,
+        provider.value,
+        issuance_source.value,
+        user.email,
+        int(account_size),
+    )
+    return record
+
+
+async def provision_new_account(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    email: str,
+    provider: ProviderName | MarketProvider = "internal",
+    account_size: int = 25_000,
+    display_name: str | None = None,
+    issuance_source: IssuanceSource = IssuanceSource.MANUAL,
+    prop_firm_account_slug: str | None = None,
+    kalshi_categories: list[str] | None = None,
+    replace_existing: bool = True,
+    external_order_id: str | None = None,
+    issued_by_user_id: str | None = None,
+    send_credentials_email: bool = True,
+    metadata: dict[str, Any] | None = None,
+) -> ProvisionResult:
+    """Provision a trader evaluation account (new or existing user).
+
+    When ``provider="kalshi"``:
+    - Fetches live Kalshi markets for the requested categories
+    - Links the account to Kalshi as its market data source
+    - Applies challenge rules (model type, profit target, drawdowns, stake limits)
+
+    Supports webhook purchases and manual Prop Firm Admin issuance.
+    """
+    resolved_provider = _parse_provider(provider)
+    account_size_f = float(account_size)
+    if account_size_f <= 0:
+        raise ValueError("account_size must be positive")
+
+    if resolved_provider is MarketProvider.KALSHI:
+        await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
+
+    product: PropFirmAccount | None = None
+    if prop_firm_account_slug:
+        product = await get_prop_firm_account_by_slug(db, tenant.id, prop_firm_account_slug)
+    if product is None and resolved_provider is not MarketProvider.INTERNAL:
+        product = await get_prop_firm_account_for_provider(db, tenant.id, resolved_provider)
     if product is None:
-        product = await ensure_tenant_account_catalog(db, tenant)
+        product = await get_default_prop_firm_account(db, tenant.id)
+    if product is None:
+        product = await ensure_tenant_account_catalog(
+            db, tenant, include_kalshi=resolved_provider is MarketProvider.KALSHI
+        )
 
     loaded = await db.execute(
         select(PropFirmAccount)
@@ -197,31 +535,121 @@ async def provision_trader_demo_account(
         .options(selectinload(PropFirmAccount.challenge_config))
     )
     product = loaded.scalar_one()
+    config = product.challenge_config
 
-    resolved_provider = _resolve_provider(product, provider=provider)
-    kalshi_tickers = product.kalshi_market_tickers
-    if resolved_provider is MarketProvider.KALSHI and not kalshi_tickers:
-        kalshi_tickers = product.challenge_config.kalshi_market_tickers
+    kalshi_tickers: list[str] = []
+    if resolved_provider is MarketProvider.KALSHI:
+        kalshi_tickers = await fetch_kalshi_live_markets(categories=kalshi_categories)
+    elif product.kalshi_market_tickers:
+        kalshi_tickers = list(product.kalshi_market_tickers)
+    elif config.kalshi_market_tickers:
+        kalshi_tickers = list(config.kalshi_market_tickers)
 
-    account = TraderDemoAccount(
-        tenant_id=tenant.id,
-        user_id=user.id,
-        prop_firm_account_id=product.id,
-        challenge_config_id=product.challenge_config_id,
+    generate_credentials = issuance_source in {
+        IssuanceSource.WEBHOOK,
+        IssuanceSource.MANUAL,
+    }
+    user, created_user, temporary_password = await _find_or_create_user(
+        db,
+        tenant=tenant,
+        email=email,
+        display_name=display_name,
+        generate_credentials=generate_credentials,
+    )
+
+    account = await _upsert_trader_demo_account(
+        db,
+        user=user,
+        tenant=tenant,
+        product=product,
         provider=resolved_provider,
-        starting_balance=float(product.challenge_config.starting_balance),
-        kalshi_market_tickers=list(kalshi_tickers) if kalshi_tickers else None,
+        account_size=account_size_f,
+        kalshi_tickers=kalshi_tickers,
+        replace_existing=replace_existing,
     )
-    db.add(account)
-    await db.flush()
-    await db.refresh(account, attribute_names=["challenge_config", "prop_firm_account"])
-    logger.info(
-        "Provisioned trader demo account for %s@%s (provider=%s)",
-        user.email,
+
+    from app.core.config import get_settings
+    from app.runtime.store import get_trading_store
+
+    get_trading_store().reset_session(
         tenant.slug,
-        account.provider.value,
+        str(user.id),
+        account.to_program_dict(),
+        provider=account.provider.value,
+        kalshi_market_tickers=account.effective_kalshi_tickers(),
+        demo_account_id=account.id,
     )
-    return account
+
+    email_sent = False
+    if send_credentials_email and (created_user or issuance_source is IssuanceSource.MANUAL):
+        settings = get_settings()
+        login_url = f"{settings.trader_login_base_url.rstrip('/')}?tenant={tenant.slug}"
+        email_sent = await send_account_credentials_email(
+            AccountCredentialsEmail(
+                to_email=user.email,
+                display_name=user.display_name,
+                tenant_name=tenant.name,
+                provider=resolved_provider.value,
+                account_size=account_size_f,
+                login_url=login_url,
+                temporary_password=temporary_password if created_user else None,
+            )
+        )
+
+    sold_record = await _log_sold_account(
+        db,
+        tenant=tenant,
+        user=user,
+        account=account,
+        provider=resolved_provider,
+        issuance_source=issuance_source,
+        account_size=account_size_f,
+        model_type=config.model_type,
+        kalshi_tickers=account.effective_kalshi_tickers(),
+        credentials_generated=bool(temporary_password),
+        email_sent=email_sent,
+        issued_by_user_id=issued_by_user_id,
+        external_order_id=external_order_id,
+        metadata=metadata,
+    )
+
+    return ProvisionResult(
+        user=user,
+        account=account,
+        sold_record=sold_record,
+        created_user=created_user,
+        temporary_password=temporary_password,
+        email_sent=email_sent,
+        kalshi_market_tickers=account.effective_kalshi_tickers(),
+    )
+
+
+async def provision_trader_demo_account(
+    db: AsyncSession,
+    *,
+    user: User,
+    tenant: Tenant,
+    prop_firm_account: PropFirmAccount | None = None,
+    provider: MarketProvider | None = None,
+) -> TraderDemoAccount:
+    """Legacy helper — creates a demo account from signup defaults."""
+    slug = prop_firm_account.slug if prop_firm_account else None
+    resolved_provider = provider
+    if resolved_provider is None and prop_firm_account is not None:
+        resolved_provider = prop_firm_account.provider
+    result = await provision_new_account(
+        db,
+        tenant=tenant,
+        email=user.email,
+        display_name=user.display_name,
+        provider=resolved_provider or MarketProvider.INTERNAL,
+        account_size=int((tenant.program or {}).get("account_sizes", [25_000])[0]),
+        issuance_source=IssuanceSource.SIGNUP,
+        prop_firm_account_slug=slug,
+        replace_existing=False,
+        send_credentials_email=False,
+    )
+    return result.account
 
 
 async def get_trader_demo_account(
@@ -253,3 +681,16 @@ async def get_or_provision_trader_demo_account(
     if account is not None:
         return account
     return await provision_trader_demo_account(db, user=user, tenant=tenant)
+
+
+async def list_sold_accounts(
+    db: AsyncSession,
+    *,
+    tenant_id: str | None = None,
+    limit: int = 100,
+) -> list[SoldAccount]:
+    query = select(SoldAccount).order_by(SoldAccount.created_at.desc()).limit(limit)
+    if tenant_id:
+        query = query.where(SoldAccount.tenant_id == tenant_id)
+    result = await db.execute(query)
+    return list(result.scalars().all())

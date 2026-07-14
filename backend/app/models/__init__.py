@@ -1,8 +1,10 @@
 from app.models.base import Base
 from app.models.account import (
     ChallengeConfig,
+    IssuanceSource,
     MarketProvider,
     PropFirmAccount,
+    SoldAccount,
     TraderDemoAccount,
 )
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
@@ -16,8 +18,10 @@ __all__ = [
     "LiveEvent",
     "LiveEventSource",
     "LiveEventStatus",
+    "IssuanceSource",
     "MarketProvider",
     "PropFirmAccount",
+    "SoldAccount",
     "Tenant",
     "TraderDemoAccount",
     "User",

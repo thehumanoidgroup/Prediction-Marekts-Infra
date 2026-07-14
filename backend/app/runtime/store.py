@@ -197,6 +197,29 @@ class TradingStore:
             self._sessions[key] = session
             return session
 
+    def reset_session(
+        self,
+        tenant_slug: str,
+        user_id: str,
+        program: dict,
+        *,
+        provider: str = "internal",
+        kalshi_market_tickers: list[str] | None = None,
+        demo_account_id: str | None = None,
+    ) -> TraderSession:
+        """Replace an existing in-memory session (e.g. after re-provisioning)."""
+        key = (tenant_slug, user_id)
+        with self._lock:
+            self._sessions.pop(key, None)
+        return self.get_session(
+            tenant_slug,
+            user_id,
+            program,
+            provider=provider,
+            kalshi_market_tickers=kalshi_market_tickers,
+            demo_account_id=demo_account_id,
+        )
+
     def list_markets(
         self,
         *,

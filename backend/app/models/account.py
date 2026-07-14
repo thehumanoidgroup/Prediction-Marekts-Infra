@@ -65,6 +65,8 @@ class ChallengeConfig(Base, UUIDTimestampMixin):
     max_total_exposure: Mapped[float | None] = mapped_column(Float, nullable=True)
     challenge_duration_days: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     min_trading_days: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    model_type: Mapped[str] = mapped_column(String(64), default="evaluation", nullable=False)
+    min_consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Provider-specific market allowlists (optional).
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -110,6 +112,56 @@ class PropFirmAccount(Base, UUIDTimestampMixin):
     trader_accounts = relationship("TraderDemoAccount", back_populates="prop_firm_account")
 
 
+class IssuanceSource(str, enum.Enum):
+    """How a trader evaluation account was issued."""
+
+    WEBHOOK = "webhook"
+    MANUAL = "manual"
+    SIGNUP = "signup"
+    SYSTEM = "system"
+
+
+class SoldAccount(Base, UUIDTimestampMixin):
+    """Audit log of issued evaluation accounts for Super Admin reporting."""
+
+    __tablename__ = "sold_accounts"
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    trader_demo_account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("trader_demo_accounts.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    provider: Mapped[MarketProvider] = mapped_column(
+        Enum(MarketProvider, values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    issuance_source: Mapped[IssuanceSource] = mapped_column(
+        Enum(IssuanceSource, values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    account_size: Mapped[float] = mapped_column(Float, nullable=False)
+    model_type: Mapped[str] = mapped_column(String(64), default="evaluation", nullable=False)
+    trader_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    trader_display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    external_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    credentials_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    issued_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
+
+    tenant = relationship("Tenant", back_populates="sold_accounts")
+    user = relationship("User", foreign_keys=[user_id])
+    trader_demo_account = relationship("TraderDemoAccount", back_populates="sold_records")
+    issued_by = relationship("User", foreign_keys=[issued_by_user_id])
+
+
 class TraderDemoAccount(Base, UUIDTimestampMixin):
     """A trader's active evaluation / demo challenge account."""
 
@@ -141,12 +193,15 @@ class TraderDemoAccount(Base, UUIDTimestampMixin):
         nullable=False,
     )
     starting_balance: Mapped[float] = mapped_column(Float, nullable=False)
+    virtual_balance: Mapped[float] = mapped_column(Float, nullable=False)
+    model_type: Mapped[str] = mapped_column(String(64), default="evaluation", nullable=False)
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     tenant = relationship("Tenant", back_populates="trader_demo_accounts")
     user = relationship("User", back_populates="demo_account")
     prop_firm_account = relationship("PropFirmAccount", back_populates="trader_accounts")
     challenge_config = relationship("ChallengeConfig", back_populates="trader_accounts")
+    sold_records = relationship("SoldAccount", back_populates="trader_demo_account")
 
     def effective_kalshi_tickers(self) -> list[str]:
         """Resolved Kalshi ticker allowlist (account → firm account → config)."""
@@ -158,23 +213,44 @@ class TraderDemoAccount(Base, UUIDTimestampMixin):
             return list(self.challenge_config.kalshi_market_tickers)
         return []
 
+    def scaled_stake_limits(self) -> dict[str, float | None]:
+        """Scale absolute stake caps relative to the config template balance."""
+        cfg = self.challenge_config
+        base = float(cfg.starting_balance) or self.starting_balance
+        ratio = self.starting_balance / base if base > 0 else 1.0
+
+        def scale(value: float | None) -> float | None:
+            if value is None:
+                return None
+            return round(float(value) * ratio, 2)
+
+        return {
+            "max_stake_per_order": scale(cfg.max_stake_per_order),
+            "max_exposure_per_market": scale(cfg.max_exposure_per_market),
+            "max_total_exposure": scale(cfg.max_total_exposure),
+        }
+
     def to_program_dict(self) -> dict[str, Any]:
         """Map persisted challenge rules into the tenant ``program`` shape."""
         cfg = self.challenge_config
+        scaled = self.scaled_stake_limits()
         return {
             "currency": cfg.currency,
             "starting_balance": self.starting_balance,
+            "virtual_balance": self.virtual_balance,
             "account_sizes": [int(self.starting_balance)],
             "profit_target_pct": cfg.profit_target_pct,
             "max_daily_loss_pct": cfg.max_daily_loss_pct,
             "max_drawdown_pct": cfg.max_drawdown_pct,
             "drawdown_mode": cfg.drawdown_mode,
             "profit_split_pct": cfg.profit_split_pct,
-            "max_stake_per_order": cfg.max_stake_per_order,
-            "max_exposure_per_market": cfg.max_exposure_per_market,
-            "max_total_exposure": cfg.max_total_exposure,
+            "max_stake_per_order": scaled["max_stake_per_order"],
+            "max_exposure_per_market": scaled["max_exposure_per_market"],
+            "max_total_exposure": scaled["max_total_exposure"],
             "challenge_duration_days": cfg.challenge_duration_days,
             "min_trading_days": cfg.min_trading_days,
+            "model_type": self.model_type,
+            "min_consistency_score": cfg.min_consistency_score,
             "provider": self.provider.value,
             "kalshi_market_tickers": self.effective_kalshi_tickers(),
         }

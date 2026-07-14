@@ -70,3 +70,6 @@ class Tenant(Base, UUIDTimestampMixin):
     trader_demo_accounts = relationship(
         "TraderDemoAccount", back_populates="tenant", cascade="all, delete-orphan"
     )
+    sold_accounts = relationship(
+        "SoldAccount", back_populates="tenant", cascade="all, delete-orphan"
+    )

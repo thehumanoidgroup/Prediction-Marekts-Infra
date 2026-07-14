@@ -40,6 +40,7 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
     { href: "/platform", label: "Overview", icon: "globe", exact: true },
     { href: "/platform/firms", label: "All firms", icon: "users" },
     { href: "/platform/markets", label: "Global templates", icon: "markets" },
+    { href: "/platform/sold-accounts", label: "Sold accounts", icon: "shield" },
   ];
 
   return [{ items: trader }, { label: "Firm admin", items: admin }, { label: "Platform", items: platform }];

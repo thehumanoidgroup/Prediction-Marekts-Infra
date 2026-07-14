@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     kalshi_max_retries: int = 3
     kalshi_retry_backoff_seconds: float = 0.5
 
+    # Account provisioning
+    provisioning_email_enabled: bool = True
+    webhook_secret: str | None = None
+    trader_login_base_url: str = "http://localhost:3000/login"
+
     @model_validator(mode="before")
     @classmethod
     def _load_unprefixed_kalshi_env(cls, data: Any) -> Any:
