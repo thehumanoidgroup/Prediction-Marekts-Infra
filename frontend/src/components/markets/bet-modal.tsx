@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { notifyPortfolioRefresh } from "@/lib/hooks/use-dashboard-data";
+import { useOrderRiskPreview } from "@/lib/hooks/use-order-risk-preview";
 import type { Outcome } from "@/lib/types";
 import { useLivePrice, useOptimisticPriceUpdate } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ProbabilityBar } from "@/components/ui/probability-bar";
 import { IconClose } from "@/components/ui/icons";
 import { LiveTickBadge } from "@/components/markets/live-price";
+import { OrderRiskWarnings } from "@/components/markets/order-risk-warnings";
 import { cn } from "@/lib/utils";
 
 const QUICK_SIZES = [100, 250, 500, 1000];
@@ -62,6 +64,17 @@ export function BetModal({
     return null;
   }, [shares]);
 
+  const { preview: riskPreview, loading: riskLoading } = useOrderRiskPreview({
+    marketId,
+    outcome,
+    side: "buy",
+    shares,
+    yesPrice,
+    enabled: !placed,
+  });
+
+  const blockedByRisk = riskPreview !== null && !riskPreview.allowed;
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -87,7 +100,7 @@ export function BetModal({
       });
       const body = await response.json();
       if (!response.ok) {
-        setError(body.error ?? "Order failed");
+        setError(body.detail ?? body.error ?? "Order failed");
         return;
       }
       setPlaced(
@@ -241,10 +254,12 @@ export function BetModal({
               </div>
             </dl>
 
+            <OrderRiskWarnings preview={riskPreview} loading={riskLoading} />
+
             <Button
               size="lg"
               variant={outcome === "yes" ? "up" : "down"}
-              disabled={pending || invalid !== null}
+              disabled={pending || invalid !== null || blockedByRisk}
               onClick={submit}
               className="w-full rounded-xl"
             >

@@ -37,10 +37,10 @@ export function ChallengePanel({ account }: { account: ChallengeAccount }) {
     ? Math.min(100, (profitObjective.current / profitObjective.target) * 100)
     : 0;
 
-  const drawdownAmount = (account.maxDrawdownPct / 100) * account.startingBalance;
-  const floor = account.startingBalance - drawdownAmount;
+  const floor = account.drawdownFloor ?? account.startingBalance * (1 - account.maxDrawdownPct / 100);
+  const drawdownBudget = Math.max(1, account.highWaterMark ?? account.startingBalance) - floor;
   const buffer = account.equity - floor;
-  const bufferPct = Math.min(100, Math.max(0, (buffer / drawdownAmount) * 100));
+  const bufferPct = Math.min(100, Math.max(0, (buffer / drawdownBudget) * 100));
   const health =
     bufferPct > 50
       ? { label: "Healthy", tone: "up" as const, text: "text-up" }
@@ -57,13 +57,29 @@ export function ChallengePanel({ account }: { account: ChallengeAccount }) {
         <div className="flex items-center gap-2">
           <IconShield className="text-sm text-accent" />
           <span className="text-xs font-semibold text-foreground">{account.label}</span>
+          {account.provider === "kalshi" ? (
+            <Badge tone="accent">Kalshi</Badge>
+          ) : null}
         </div>
-        <Badge tone={phaseTones[account.phase]}>{phaseLabels[account.phase]}</Badge>
+        <div className="flex items-center gap-2">
+          {account.challengeStatus === "failed" ? (
+            <Badge tone="down">Failed</Badge>
+          ) : account.challengeStatus === "passed" ? (
+            <Badge tone="up">Passed</Badge>
+          ) : null}
+          <Badge tone={phaseTones[account.phase]}>{phaseLabels[account.phase]}</Badge>
+        </div>
       </div>
 
       <CardHeader
         title="Challenge progress"
-        subtitle={`Day ${account.daysTraded} · ${daysLeft > 0 ? `${daysLeft} days to min` : "Min days met"}`}
+        subtitle={
+          account.provider === "kalshi"
+            ? `Kalshi virtual account · Day ${account.daysTraded} · ${
+                daysLeft > 0 ? `${daysLeft} days to min` : "Min days met"
+              }`
+            : `Day ${account.daysTraded} · ${daysLeft > 0 ? `${daysLeft} days to min` : "Min days met"}`
+        }
         action={
           <Badge tone={metCount === account.objectives.length ? "up" : "neutral"}>
             {metCount}/{account.objectives.length} met
@@ -173,7 +189,8 @@ export function ChallengePanel({ account }: { account: ChallengeAccount }) {
 
         <p className="mt-auto border-t border-edge pt-3 text-[11px] leading-relaxed text-faint">
           Breaching the drawdown floor or a daily loss limit fails the challenge. Metrics update
-          in real time as positions are marked to market.
+          in real time as positions are marked to market
+          {account.provider === "kalshi" ? " using live Kalshi prices" : ""}.
         </p>
       </CardBody>
     </Card>

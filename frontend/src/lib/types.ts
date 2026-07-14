@@ -159,10 +159,31 @@ export interface ChallengeObjective {
   met: boolean;
 }
 
+export interface AccountRiskLimits {
+  maxStakePerOrder: number | null;
+  maxExposurePerMarket: number | null;
+  maxTotalExposure: number | null;
+}
+
+export interface OrderRiskPreview {
+  allowed: boolean;
+  reasons: string[];
+  violations: string[];
+  stake: number;
+  side: "buy" | "sell";
+  projectedMarketExposure?: number;
+  projectedTotalExposure?: number;
+  maxStakePerOrder?: number | null;
+  maxExposurePerMarket?: number | null;
+  maxTotalExposure?: number | null;
+  challengeStatus?: string;
+}
+
 export interface ChallengeAccount {
   id: string;
   label: string;
   phase: ChallengePhase;
+  challengeStatus?: "active" | "passed" | "failed";
   provider?: "internal" | "polymarket" | "kalshi";
   kalshiMarketTickers?: string[];
   startingBalance: number;
@@ -173,10 +194,14 @@ export interface ChallengeAccount {
   totalPnl: number;
   maxDailyLossPct: number;
   maxDrawdownPct: number;
+  drawdownMode?: "static" | "trailing" | "absolute";
+  drawdownFloor?: number;
+  highWaterMark?: number;
   profitTargetPct: number;
   daysTraded: number;
   minTradingDays: number;
   startedAt: number;
+  riskLimits?: AccountRiskLimits;
   objectives: ChallengeObjective[];
   equityCurve: PricePoint[];
 }

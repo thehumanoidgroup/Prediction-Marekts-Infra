@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { notifyPortfolioRefresh } from "@/lib/hooks/use-dashboard-data";
+import { useOrderRiskPreview } from "@/lib/hooks/use-order-risk-preview";
 import type { Outcome } from "@/lib/types";
 import { useLivePrice } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { OrderRiskWarnings } from "@/components/markets/order-risk-warnings";
 import { cn } from "@/lib/utils";
 
 const QUICK_SIZES = [100, 250, 500, 1000];
@@ -44,6 +46,17 @@ export function TradePanel({
     return null;
   }, [shares, side, cost, balance]);
 
+  const { preview: riskPreview, loading: riskLoading } = useOrderRiskPreview({
+    marketId,
+    outcome,
+    side,
+    shares,
+    yesPrice,
+    enabled: !disabled,
+  });
+
+  const blockedByRisk = riskPreview !== null && !riskPreview.allowed;
+
   async function submit() {
     setPending(true);
     setMessage(null);
@@ -55,7 +68,7 @@ export function TradePanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage({ tone: "down", text: body.error ?? "Order failed" });
+        setMessage({ tone: "down", text: body.detail ?? body.error ?? "Order failed" });
         return;
       }
       setMessage({
@@ -172,10 +185,12 @@ export function TradePanel({
         ) : null}
       </dl>
 
+      <OrderRiskWarnings preview={riskPreview} loading={riskLoading} />
+
       <Button
         size="lg"
         variant={outcome === "yes" ? "up" : "down"}
-        disabled={disabled || pending || invalid !== null}
+        disabled={disabled || pending || invalid !== null || blockedByRisk}
         onClick={submit}
         className="w-full"
       >

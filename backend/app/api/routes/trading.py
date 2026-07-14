@@ -34,6 +34,16 @@ class PlaceOrderBody(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class PreviewOrderBody(BaseModel):
+    market_id: str = Field(alias="marketId")
+    outcome: Literal["yes", "no"]
+    side: Literal["buy", "sell"] = "buy"
+    shares: int = Field(gt=0)
+    yes_price: float | None = Field(default=None, alias="yesPrice", gt=0, lt=1)
+
+    model_config = {"populate_by_name": True}
+
+
 class JournalNoteBody(BaseModel):
     note: str = Field(min_length=1, max_length=2000)
     tags: list[str] = Field(default_factory=list)
@@ -101,14 +111,45 @@ async def get_portfolio(
     session: Annotated[TraderSession, Depends(get_trader_session)],
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
 ) -> dict:
-    if session.provider == "kalshi":
-        await _refresh_session_external_prices(session)
     store = get_trading_store()
+    if session.provider == "kalshi" or session.external_markets:
+        await _refresh_session_external_prices(session)
+    store.sync_session_risk(session)
     return {
         "account": serialize_account(session, store),
         "positions": serialize_position(session, store),
         "summary": serialize_portfolio_summary(session, store),
     }
+
+
+@router.post("/orders/preview")
+async def preview_order(
+    body: PreviewOrderBody,
+    session: Annotated[TraderSession, Depends(get_trader_session)],
+) -> dict:
+    """Pre-trade risk check — same rules as order placement."""
+    store = get_trading_store()
+    market_id = body.market_id
+    yes_price = body.yes_price
+
+    if market_id.lower().startswith("kalshi-"):
+        if session.kalshi_market_tickers and not _kalshi_ticker_allowed(session, market_id):
+            raise HTTPException(403, detail="Kalshi market not in your allowlist")
+        if yes_price is None:
+            market = await get_kalshi_service().get_market_by_id(market_id, refresh=True)
+            if market is None:
+                raise HTTPException(404, detail="Kalshi market not found")
+            yes_price = float(market.get("yesPrice") or 0.5)
+
+    preview = store.preview_order_risk(
+        session,
+        market_id=market_id,
+        outcome=body.outcome,
+        side=body.side,
+        shares=body.shares,
+        yes_price=yes_price,
+    )
+    return {"preview": preview}
 
 
 @router.post("/orders", status_code=201)
