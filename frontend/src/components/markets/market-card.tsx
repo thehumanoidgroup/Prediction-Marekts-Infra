@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Market } from "@/lib/types";
 import { formatCompactUsd, formatTimeUntil } from "@/lib/format";
+import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { IconClock, IconUsers } from "@/components/ui/icons";
@@ -43,9 +44,7 @@ export function MarketCard({ market }: { market: Market }) {
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge>{categoryLabels[market.category]}</Badge>
-            {market.source === "internal" ? (
-              <Badge className="bg-accent-soft text-accent">LMSR</Badge>
-            ) : null}
+            <MarketSourceBadge source={market.source} compact />
           </div>
           <div className="flex items-center gap-1.5">
             {market.status === "closing_soon" ? <Badge tone="warn">Closing soon</Badge> : null}

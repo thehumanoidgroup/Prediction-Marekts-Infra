@@ -92,7 +92,16 @@ def test_live_events_api_list(client):
     assert response.status_code == 200
     body = response.json()
     assert body["count"] >= 1
+    assert "counts" in body
     assert body["events"][0]["source"] in {"internal", "polymarket"}
+
+
+def test_live_events_api_source_filter(client):
+    response = client.get("/api/v1/live-events", params={"source": "internal"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "internal"
+    assert all(event["source"] == "internal" for event in body["events"])
 
 
 def test_live_events_api_category_filter(client):

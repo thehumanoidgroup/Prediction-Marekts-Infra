@@ -65,6 +65,32 @@ export type PolymarketMarket = Market & {
   externalConditionId: string;
 };
 
+export type LiveEventSource = MarketSourceType;
+export type LiveEventStatus = MarketStatus;
+
+/** Unified live event from internal LMSR or Polymarket feeds. */
+export interface LiveEvent {
+  id: string;
+  externalId: string;
+  source: LiveEventSource;
+  category: MarketCategory;
+  status: LiveEventStatus;
+  question: string;
+  probabilities: { yes: number; no: number };
+  yesPrice: number;
+  volume: number;
+  volume24h: number;
+  change24h: number;
+  lastUpdated: string;
+}
+
+export interface LiveEventsPayload {
+  events: LiveEvent[];
+  count: number;
+  counts: { internal: number; polymarket: number };
+  source: MarketViewSource;
+}
+
 export interface HybridMarketsPayload {
   markets: Market[];
   source: MarketViewSource;

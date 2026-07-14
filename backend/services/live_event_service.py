@@ -159,22 +159,58 @@ class LiveEventService:
         event.change_24h = float(snapshot.get("change24h") or event.change_24h)
         event.status = _STATUS_MAP.get(str(snapshot.get("status", "open")), event.status)
 
-    async def get_all_live_events(self, *, sync: bool = True) -> list[LiveEvent]:
-        if sync:
-            await self.sync_from_sources()
+    async def _refresh_polymarket_snapshot(self, event: LiveEvent) -> None:
+        """Pull the latest Polymarket quote into the persisted row."""
+        if event.source != LiveEventSource.POLYMARKET:
+            return
 
-        result = await self.db.execute(
-            select(LiveEvent).order_by(LiveEvent.volume.desc(), LiveEvent.question)
-        )
-        events = list(result.scalars().all())
+        try:
+            market = await get_polymarket_service().get_market_by_id(event.external_id)
+        except PolymarketError:
+            return
 
-        for event in events:
+        if market is None:
+            return
+
+        fields = _market_to_event_fields(market)
+        event.probabilities = fields["probabilities"]
+        event.volume = fields["volume"]
+        event.volume_24h = fields["volume_24h"]
+        event.change_24h = fields["change_24h"]
+        event.status = fields["status"]
+        event.question = fields["question"] or event.question
+
+    async def _refresh_event_snapshot(self, event: LiveEvent) -> None:
+        if event.source == LiveEventSource.INTERNAL:
             await self._refresh_internal_snapshot(event)
+        else:
+            await self._refresh_polymarket_snapshot(event)
 
-        await self.db.commit()
-        return events
+    def _count_by_source(self, events: list[LiveEvent]) -> dict[str, int]:
+        counts = {"internal": 0, "polymarket": 0}
+        for event in events:
+            key = event.source.value
+            if key in counts:
+                counts[key] += 1
+        return counts
 
-    async def get_events_by_category(self, category: str, *, sync: bool = True) -> list[LiveEvent]:
+    def _apply_source_filter(
+        self,
+        events: list[LiveEvent],
+        source: str,
+    ) -> list[LiveEvent]:
+        if not source or source == "all":
+            return events
+        return [event for event in events if event.source.value == source]
+
+    async def get_combined_feed(
+        self,
+        *,
+        category: str = "all",
+        source: str = "all",
+        sync: bool = True,
+    ) -> tuple[list[LiveEvent], dict[str, int]]:
+        """Return a unified internal + Polymarket feed with per-source counts."""
         if sync:
             await self.sync_from_sources()
 
@@ -186,9 +222,19 @@ class LiveEventService:
         events = list(result.scalars().all())
 
         for event in events:
-            await self._refresh_internal_snapshot(event)
+            await self._refresh_event_snapshot(event)
 
         await self.db.commit()
+        counts = self._count_by_source(events)
+        filtered = self._apply_source_filter(events, source)
+        return filtered, counts
+
+    async def get_all_live_events(self, *, sync: bool = True) -> list[LiveEvent]:
+        events, _ = await self.get_combined_feed(sync=sync)
+        return events
+
+    async def get_events_by_category(self, category: str, *, sync: bool = True) -> list[LiveEvent]:
+        events, _ = await self.get_combined_feed(category=category, sync=sync)
         return events
 
     async def update_event_probability(

@@ -5,7 +5,6 @@ import random
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.live_event import LiveEventSource
 from services.live_event_service import get_live_event_service
 
 logger = logging.getLogger(__name__)
@@ -22,13 +21,11 @@ async def run_market_ticker() -> None:
             async with SessionLocal() as db:
                 service = get_live_event_service(db)
                 events = await service.get_all_live_events()
-                internal_events = [
-                    event for event in events if event.source == LiveEventSource.INTERNAL
-                ]
-                if not internal_events:
+                tradable_events = list(events)
+                if not tradable_events:
                     continue
 
-                event = random.choice(internal_events)
+                event = random.choice(tradable_events)
                 yes = float(event.probabilities.get("yes", 0.5))
                 drift = random.uniform(-0.02, 0.02)
                 new_yes = round(min(0.97, max(0.03, yes + drift)), 3)

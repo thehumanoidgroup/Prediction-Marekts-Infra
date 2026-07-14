@@ -216,3 +216,41 @@ export async function postBackendJournalNote(
     body: { note, tags },
   });
 }
+
+export async function fetchBackendLiveEvents(
+  tenantSlug: string,
+  filters: {
+    category?: string;
+    source?: import("@/lib/types").MarketViewSource;
+  } = {},
+): Promise<import("@/lib/types").LiveEventsPayload | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+
+  const url = new URL(`${base}/api/v1/live-events`);
+  url.searchParams.set("category", filters.category ?? "all");
+  url.searchParams.set("source", filters.source ?? "all");
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Slug": tenantSlug,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof err.detail === "string" ? err.detail : `Backend error ${response.status}`,
+      );
+    }
+
+    const { mapLiveEventsPayload } = await import("@/lib/live-events");
+    return mapLiveEventsPayload(await response.json());
+  } catch (error) {
+    console.error("[backend] /live-events:", error);
+    return null;
+  }
+}

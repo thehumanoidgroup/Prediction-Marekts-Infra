@@ -14,7 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { IconClock, IconUsers } from "@/components/ui/icons";
 import { Sparkline } from "@/components/ui/sparkline";
-import { ProbabilityBar } from "@/components/ui/probability-bar";
+import { LiveProbability } from "@/components/markets/live-price";
+import { LiveProbabilityBar } from "@/components/markets/live-probability-bar";
+import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { PolymarketDetailModal } from "@/components/markets/polymarket-detail-modal";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +90,7 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
           className="flex flex-1 flex-col p-4 pb-3 text-left sm:p-5 sm:pb-3"
         >
           <div className="flex flex-wrap items-center gap-1.5 pr-16">
-            <Badge className="bg-[#6366f1]/15 text-[#a5b4fc]">Polymarket</Badge>
+            <MarketSourceBadge source="polymarket" />
             <Badge>{categoryLabels[market.category]}</Badge>
             {market.status === "closing_soon" ? <Badge tone="warn">Closing soon</Badge> : null}
           </div>
@@ -115,9 +117,11 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
               ) : null}
             </div>
             <div className="mt-1 flex items-end justify-between gap-3">
-              <span className="tabular text-3xl font-bold tracking-tight text-foreground sm:text-[2rem]">
-                {formatCents(prices.yes)}
-              </span>
+              <LiveProbability
+                marketId={market.id}
+                initialPrice={prices.yes}
+                className="text-3xl font-bold tracking-tight sm:text-[2rem]"
+              />
               <Sparkline
                 data={market.history.slice(-30)}
                 width={96}
@@ -125,7 +129,7 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
                 positive={up}
               />
             </div>
-            <ProbabilityBar yesPrice={prices.yes} className="mt-3" size="sm" />
+            <LiveProbabilityBar marketId={market.id} initialPrice={prices.yes} className="mt-3" size="sm" />
           </div>
         </button>
 

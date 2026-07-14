@@ -1,6 +1,6 @@
 """REST endpoints for live prediction events."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -19,6 +19,8 @@ from services.live_event_service import LiveEventService, get_live_event_service
 
 router = APIRouter(prefix="/live-events", tags=["live-events"])
 
+LiveEventSourceFilter = Literal["all", "internal", "polymarket"]
+
 
 def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> LiveEventService:
     return get_live_event_service(db)
@@ -28,15 +30,18 @@ def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> LiveEventService:
 async def list_live_events(
     service: Annotated[LiveEventService, Depends(_service)],
     category: str = Query("all"),
+    source: LiveEventSourceFilter = Query(
+        "all",
+        description="Filter by liquidity source: internal LMSR, polymarket, or all",
+    ),
 ) -> LiveEventListResponse:
-    if category == "all":
-        events = await service.get_all_live_events()
-    else:
-        events = await service.get_events_by_category(category)
+    events, counts = await service.get_combined_feed(category=category, source=source)
 
     return LiveEventListResponse(
         events=[LiveEventResponse.model_validate(event) for event in events],
         count=len(events),
+        counts=counts,
+        source=source,
     )
 
 
@@ -45,7 +50,7 @@ async def get_live_event(
     event_id: str,
     service: Annotated[LiveEventService, Depends(_service)],
 ) -> LiveEventResponse:
-    events = await service.get_all_live_events()
+    events, _ = await service.get_combined_feed()
     match = next(
         (event for event in events if event.id == event_id or event.external_id == event_id),
         None,
