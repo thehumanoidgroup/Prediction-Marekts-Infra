@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
 from app.runtime.serializers import serialize_market
 from app.runtime.store import get_trading_store
+from integrations.kalshi import KalshiError, get_kalshi_service
 from integrations.polymarket import PolymarketError, get_polymarket_service
 from realtime.event_broadcaster import broadcast_live_event_changes, broadcast_new_event
 from tasks.providers.base import IngestedEventSnapshot
@@ -97,8 +99,8 @@ class LiveEventService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def sync_from_sources(self, *, polymarket_limit: int = 100) -> int:
-        """Upsert live events from internal LMSR and a capped Polymarket slice."""
+    async def sync_from_sources(self, *, polymarket_limit: int = 100, kalshi_limit: int = 100) -> int:
+        """Upsert live events from internal LMSR, Polymarket, and Kalshi."""
         markets: list[dict[str, Any]] = [
             serialize_market(market)
             for market in get_trading_store().list_markets(category="all", query="", sort="volume")
@@ -114,6 +116,20 @@ class LiveEventService:
                 markets.extend(poly_markets[:polymarket_limit])
             except PolymarketError:
                 logger.warning("Polymarket unavailable during live event sync; using internal only")
+
+        if kalshi_limit > 0:
+            try:
+                kalshi_markets = await asyncio.wait_for(
+                    get_kalshi_service().get_active_markets(),
+                    timeout=5.0,
+                )
+                kalshi_markets.sort(
+                    key=lambda market: float(market.get("volume24h") or market.get("volume") or 0.0),
+                    reverse=True,
+                )
+                markets.extend(kalshi_markets[:kalshi_limit])
+            except (KalshiError, TimeoutError, asyncio.TimeoutError):
+                logger.warning("Kalshi unavailable during live event sync")
 
         upserted = 0
         for market in markets:
@@ -196,14 +212,40 @@ class LiveEventService:
         event.status = fields["status"]
         event.question = fields["question"] or event.question
 
+    async def _refresh_kalshi_snapshot(self, event: LiveEvent) -> None:
+        """Pull the latest Kalshi quote into the persisted row."""
+        if event.source != LiveEventSource.KALSHI:
+            return
+
+        try:
+            market = await asyncio.wait_for(
+                get_kalshi_service().get_market_by_id(event.external_id, refresh=True),
+                timeout=5.0,
+            )
+        except (KalshiError, TimeoutError, asyncio.TimeoutError):
+            return
+
+        if market is None:
+            return
+
+        fields = _market_to_event_fields(market)
+        event.probabilities = fields["probabilities"]
+        event.volume = fields["volume"]
+        event.volume_24h = fields["volume_24h"]
+        event.change_24h = fields["change_24h"]
+        event.status = fields["status"]
+        event.question = fields["question"] or event.question
+
     async def _refresh_event_snapshot(self, event: LiveEvent) -> None:
         if event.source == LiveEventSource.INTERNAL:
             await self._refresh_internal_snapshot(event)
         elif event.source == LiveEventSource.POLYMARKET:
             await self._refresh_polymarket_snapshot(event)
+        elif event.source == LiveEventSource.KALSHI:
+            await self._refresh_kalshi_snapshot(event)
 
     def _count_by_source(self, events: list[LiveEvent]) -> dict[str, int]:
-        counts = {"internal": 0, "polymarket": 0, "external": 0}
+        counts = {"internal": 0, "polymarket": 0, "kalshi": 0, "external": 0}
         for event in events:
             key = event.source.value
             if key in counts:

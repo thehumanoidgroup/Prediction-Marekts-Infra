@@ -24,7 +24,7 @@ function sortMarkets(markets: Market[], sort: MarketFilters["sort"] = "volume"):
 /** Client-side hybrid listing used when the backend API is unavailable. */
 export function listHybridMarkets(
   filters: MarketFilters & { source?: MarketViewSource } = {},
-): { markets: Market[]; source: MarketViewSource; counts: { internal: number; polymarket: number } } {
+): { markets: Market[]; source: MarketViewSource; counts: { internal: number; polymarket: number; kalshi: number } } {
   const source = filters.source ?? "all";
   const { category = "all", query = "", sort = "volume" } = filters;
 
@@ -57,6 +57,7 @@ export function listHybridMarkets(
   const counts = {
     internal: markets.filter((market) => market.source === "internal").length,
     polymarket: markets.filter((market) => market.source === "polymarket").length,
+    kalshi: markets.filter((market) => market.source === "kalshi").length,
   };
 
   return { markets, source, counts };

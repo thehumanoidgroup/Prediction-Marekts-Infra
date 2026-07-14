@@ -40,7 +40,9 @@ export function LiveEventCard({ event }: { event: LiveEvent }) {
   const href =
     event.source === "polymarket"
       ? `/markets/${event.externalId}?source=polymarket`
-      : `/markets/${event.externalId}`;
+      : event.source === "kalshi"
+        ? `/markets/${event.externalId}?source=kalshi`
+        : `/markets/${event.externalId}`;
   const accent = categoryAccent[event.category] ?? "border-l-accent";
 
   return (

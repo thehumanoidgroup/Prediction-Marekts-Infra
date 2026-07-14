@@ -6,12 +6,14 @@ export type MarketCategory =
   | "forex"
   | "commodities"
   | "economics"
-  | "indices";
+  | "indices"
+  | "sports"
+  | "politics";
 
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
 /** Where a market's liquidity and pricing originate. */
-export type MarketSourceType = "internal" | "polymarket" | "external";
+export type MarketSourceType = "internal" | "polymarket" | "kalshi" | "external";
 
 /** Trader UI filter for which market feeds to display. */
 export type MarketViewSource = MarketSourceType | "all";
@@ -65,6 +67,11 @@ export type PolymarketMarket = Market & {
   externalConditionId: string;
 };
 
+export type KalshiMarket = Market & {
+  source: "kalshi";
+  externalTicker: string;
+};
+
 export type LiveEventSource = MarketSourceType;
 export type LiveEventStatus = MarketStatus;
 
@@ -87,14 +94,14 @@ export interface LiveEvent {
 export interface LiveEventsPayload {
   events: LiveEvent[];
   count: number;
-  counts: { internal: number; polymarket: number };
+  counts: { internal: number; polymarket: number; kalshi: number };
   source: MarketViewSource;
 }
 
 export interface HybridMarketsPayload {
   markets: Market[];
   source: MarketViewSource;
-  counts: { internal: number; polymarket: number };
+  counts: { internal: number; polymarket: number; kalshi: number };
 }
 
 export interface PolymarketIntegrationStatus {
@@ -156,6 +163,8 @@ export interface ChallengeAccount {
   id: string;
   label: string;
   phase: ChallengePhase;
+  provider?: "internal" | "polymarket" | "kalshi";
+  kalshiMarketTickers?: string[];
   startingBalance: number;
   balance: number;
   equity: number;

@@ -20,7 +20,7 @@ from services.live_feed_analytics import analytics
 
 router = APIRouter(prefix="/live-events", tags=["live-events"])
 
-LiveEventSourceFilter = Literal["all", "internal", "polymarket", "external"]
+LiveEventSourceFilter = Literal["all", "internal", "polymarket", "kalshi", "external"]
 
 
 def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> LiveEventService:

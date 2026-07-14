@@ -19,7 +19,7 @@ interface BackendLiveEvent {
 interface BackendLiveEventsPayload {
   events: BackendLiveEvent[];
   count: number;
-  counts?: { internal: number; polymarket: number };
+  counts?: { internal: number; polymarket: number; kalshi: number };
   source?: MarketViewSource;
 }
 
@@ -51,6 +51,7 @@ export function mapLiveEventsPayload(raw: BackendLiveEventsPayload): LiveEventsP
     counts: raw.counts ?? {
       internal: events.filter((event) => event.source === "internal").length,
       polymarket: events.filter((event) => event.source === "polymarket").length,
+      kalshi: events.filter((event) => event.source === "kalshi").length,
     },
     source: raw.source ?? "all",
   };
@@ -127,6 +128,7 @@ export function listFallbackLiveEvents(options: {
     counts: {
       internal: events.filter((event) => event.source === "internal").length,
       polymarket: events.filter((event) => event.source === "polymarket").length,
+      kalshi: events.filter((event) => event.source === "kalshi").length,
     },
     source,
   };

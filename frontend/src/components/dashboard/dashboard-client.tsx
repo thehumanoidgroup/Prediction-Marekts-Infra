@@ -16,6 +16,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { ChallengePanel } from "@/components/dashboard/challenge-panel";
 import { LiveEventsSection } from "@/components/live-events/live-events-section";
+import { KalshiMarketsSection } from "@/components/dashboard/kalshi-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { LivePositionsTable } from "@/components/dashboard/live-positions";
@@ -197,6 +198,8 @@ export function DashboardClient({
           </Card>
 
           <JournalCard entries={journalEntries} />
+
+          {account.provider === "kalshi" ? <KalshiMarketsSection /> : null}
 
           <LiveEventsSection />
         </div>

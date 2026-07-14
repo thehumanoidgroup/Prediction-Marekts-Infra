@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
 import type { MarketViewSource } from "@/lib/types";
 
 const options: { id: MarketViewSource; label: string; description: string }[] = [
-  { id: "all", label: "All Markets", description: "Internal + Polymarket" },
+  { id: "all", label: "All Markets", description: "Internal + external" },
   { id: "internal", label: "Internal", description: "PropPredict LMSR" },
   { id: "polymarket", label: "Polymarket", description: "Live CLOB feed" },
+  { id: "kalshi", label: "Kalshi", description: "Live Kalshi feed" },
 ];
 
 /** Segmented control for internal, Polymarket, or hybrid market listings. */
@@ -75,6 +76,6 @@ export function MarketSourceToggle({
 export function useMarketSource(): MarketViewSource {
   const searchParams = useSearchParams();
   const raw = searchParams.get("source") as MarketViewSource | null;
-  if (raw === "internal" || raw === "polymarket") return raw;
+  if (raw === "internal" || raw === "polymarket" || raw === "kalshi") return raw;
   return "all";
 }

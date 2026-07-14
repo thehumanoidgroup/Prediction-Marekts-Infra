@@ -12,6 +12,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import SessionLocal
 from services.live_event_service import get_live_event_service
 from tasks.providers.base import IngestedEventSnapshot, LiveDataProvider
+from tasks.providers.kalshi_polling import KalshiPollingProvider
 from tasks.providers.polymarket_polling import PolymarketPollingProvider
 from tasks.providers.sports_polling import SportsPollingProvider
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROVIDER_REGISTRY: dict[str, type[LiveDataProvider]] = {
     "sports": SportsPollingProvider,
     "polymarket": PolymarketPollingProvider,
+    "kalshi": KalshiPollingProvider,
 }
 
 

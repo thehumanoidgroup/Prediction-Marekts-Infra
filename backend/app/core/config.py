@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # External live data ingestion (sports/politics/crypto polling).
     ingestion_enabled: bool = True
     ingestion_interval_seconds: float = 15.0
-    ingestion_providers: list[str] = ["sports", "polymarket"]
+    ingestion_providers: list[str] = ["sports", "polymarket", "kalshi"]
 
     # Polymarket CLOB (py-clob-client-v2)
     polymarket_host: str = "https://clob.polymarket.com"

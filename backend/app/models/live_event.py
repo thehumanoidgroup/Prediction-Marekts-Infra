@@ -15,6 +15,7 @@ from app.models.base import Base, UUIDTimestampMixin, utcnow
 class LiveEventSource(str, enum.Enum):
     INTERNAL = "internal"
     POLYMARKET = "polymarket"
+    KALSHI = "kalshi"
     EXTERNAL = "external"
 
 

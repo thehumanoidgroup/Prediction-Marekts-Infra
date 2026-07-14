@@ -53,8 +53,8 @@ _KEYWORD_CATEGORY_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(btc|bitcoin|eth|ethereum|crypto|solana|xrp)\b", re.I), "crypto"),
     (re.compile(r"\b(nvda|aapl|tsla|stock|equity|ipo|s&p|nasdaq)\b", re.I), "stocks"),
     (re.compile(r"\b(fed|cpi|inflation|gdp|fomc|rate cut)\b", re.I), "economics"),
-    (re.compile(r"\b(election|president|senate|congress|vote)\b", re.I), "economics"),
-    (re.compile(r"\b(nba|nfl|mlb|soccer|sport|game|match)\b", re.I), "economics"),
+    (re.compile(r"\b(election|president|senate|congress|vote|politic)\b", re.I), "politics"),
+    (re.compile(r"\b(nba|nfl|mlb|soccer|sport|game|match|ufc|tennis)\b", re.I), "sports"),
     (re.compile(r"\b(weather|temperature|rain|hurricane)\b", re.I), "commodities"),
 ]
 
@@ -291,18 +291,27 @@ class KalshiService:
         await self._cache_set(CACHE_ACTIVE_MARKETS, active, ttl=self._cache_ttl)
         return active
 
-    async def get_market_by_id(self, market_id: str) -> dict[str, Any] | None:
+    async def get_market_by_id(self, market_id: str, *, refresh: bool = False) -> dict[str, Any] | None:
         if not market_id:
             raise KalshiError("market_id is required.")
 
         ticker = _strip_internal_prefix(market_id)
         cache_key = f"{CACHE_MARKET_PREFIX}{ticker.upper()}"
 
-        cached = await self._cache_get(cache_key)
-        if cached is not None:
-            return dict(cached)
+        if not refresh:
+            cached = await self._cache_get(cache_key)
+            if cached is not None:
+                return dict(cached)
 
-        for market in await self.get_all_markets():
+        try:
+            raw = await self._client.get_market(ticker)
+            normalized = normalize_kalshi_market(raw)
+            await self._cache_set(cache_key, normalized, ttl=self._price_cache_ttl if refresh else self._cache_ttl)
+            return normalized
+        except KalshiError:
+            pass
+
+        for market in await self.get_all_markets(refresh=refresh):
             if str(market.get("externalTicker", "")).upper() == ticker.upper():
                 await self._cache_set(cache_key, market, ttl=self._cache_ttl)
                 return market
@@ -310,14 +319,7 @@ class KalshiService:
                 await self._cache_set(cache_key, market, ttl=self._cache_ttl)
                 return market
 
-        try:
-            raw = await self._client.get_market(ticker)
-        except KalshiError:
-            return None
-
-        normalized = normalize_kalshi_market(raw)
-        await self._cache_set(cache_key, normalized, ttl=self._cache_ttl)
-        return normalized
+        return None
 
     async def search_markets(self, query: str, *, refresh: bool = False) -> list[dict[str, Any]]:
         markets = await self.get_all_markets(refresh=refresh)

@@ -17,11 +17,12 @@ from app.runtime.serializers import (
 )
 from app.runtime.store import TraderSession, get_trading_store
 from app.ws.manager import manager
+from integrations.kalshi import KalshiError, get_kalshi_service
 from integrations.polymarket import PolymarketError
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
-MarketListingSource = Literal["internal", "polymarket", "all"]
+MarketListingSource = Literal["internal", "polymarket", "kalshi", "all"]
 
 
 class PlaceOrderBody(BaseModel):
@@ -38,19 +39,52 @@ class JournalNoteBody(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+def _kalshi_ticker_allowed(session: TraderSession, market_id: str) -> bool:
+    if not session.kalshi_market_tickers:
+        return True
+    ticker = market_id.removeprefix("kalshi-").removeprefix("KALSHI-").upper()
+    return ticker in {t.upper() for t in session.kalshi_market_tickers}
+
+
+async def _refresh_session_external_prices(session: TraderSession) -> None:
+    """Refresh cached external quotes for open positions and Kalshi allowlist."""
+    market_ids: set[str] = {pos.market_id for pos in session.bankroll.positions()}
+    for ticker in session.kalshi_market_tickers:
+        market_ids.add(f"kalshi-{ticker.upper()}")
+
+    service = get_kalshi_service()
+    for market_id in market_ids:
+        if not market_id.lower().startswith("kalshi-"):
+            continue
+        try:
+            market = await service.get_market_by_id(market_id, refresh=True)
+        except KalshiError:
+            continue
+        if market is not None:
+            session.external_markets[market_id] = market
+
+
 @router.get("/markets")
 async def list_markets(
+    session: Annotated[TraderSession, Depends(get_trader_session)],
     category: str = Query("all"),
     q: str = Query(""),
     sort: str = Query("volume"),
     source: MarketListingSource = Query(
         "all",
-        description="Market feed: internal LMSR, polymarket CLOB, or all (hybrid)",
+        description="Market feed: internal LMSR, polymarket, kalshi, or all (hybrid)",
     ),
 ) -> dict:
+    tickers = session.kalshi_market_tickers if session else None
     try:
-        return await list_hybrid_markets(category=category, query=q, sort=sort, source=source)
-    except PolymarketError as exc:
+        return await list_hybrid_markets(
+            category=category,
+            query=q,
+            sort=sort,
+            source=source,
+            kalshi_tickers=tickers,
+        )
+    except (PolymarketError, KalshiError) as exc:
         raise HTTPException(502, detail=str(exc)) from exc
 
 
@@ -67,6 +101,8 @@ async def get_portfolio(
     session: Annotated[TraderSession, Depends(get_trader_session)],
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
 ) -> dict:
+    if session.provider == "kalshi":
+        await _refresh_session_external_prices(session)
     store = get_trading_store()
     return {
         "account": serialize_account(session, store),
@@ -82,18 +118,38 @@ async def place_order(
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
 ) -> dict:
     store = get_trading_store()
+    market_id = body.market_id
+
     try:
-        result = store.place_order(
-            session,
-            market_id=body.market_id,
-            outcome=body.outcome,
-            side=body.side,
-            shares=body.shares,
-        )
+        if market_id.lower().startswith("kalshi-"):
+            if session.kalshi_market_tickers and not _kalshi_ticker_allowed(session, market_id):
+                raise HTTPException(403, detail="Kalshi market not in your allowlist")
+
+            market = await get_kalshi_service().get_market_by_id(market_id, refresh=True)
+            if market is None:
+                raise HTTPException(404, detail="Kalshi market not found")
+
+            result = store.place_external_order(
+                session,
+                market_id=market_id,
+                market_question=str(market.get("question") or market_id),
+                outcome=body.outcome,
+                side=body.side,
+                shares=body.shares,
+                yes_price=float(market.get("yesPrice") or 0.5),
+                category=str(market.get("category") or "economics"),
+            )
+        else:
+            result = store.place_order(
+                session,
+                market_id=market_id,
+                outcome=body.outcome,
+                side=body.side,
+                shares=body.shares,
+            )
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from exc
 
-    # Notify connected clients to refresh portfolio state.
     await manager.broadcast(
         tenant.slug,
         {

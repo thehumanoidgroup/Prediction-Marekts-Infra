@@ -14,10 +14,25 @@ _POLY_STUB = type(
     {"get_active_markets": AsyncMock(return_value=[])},
 )()
 
+_KALSHI_STUB = type(
+    "StubKalshiService",
+    (),
+    {
+        "get_active_markets": AsyncMock(return_value=[]),
+        "get_market_by_id": AsyncMock(return_value=None),
+    },
+)()
+
 
 @pytest.fixture(autouse=True)
 def stub_polymarket():
     with patch("services.live_event_service.get_polymarket_service", return_value=_POLY_STUB):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def stub_kalshi():
+    with patch("services.live_event_service.get_kalshi_service", return_value=_KALSHI_STUB):
         yield
 
 
@@ -93,7 +108,7 @@ def test_live_events_api_list(client):
     body = response.json()
     assert body["count"] >= 1
     assert "counts" in body
-    assert body["events"][0]["source"] in {"internal", "polymarket", "external"}
+    assert body["events"][0]["source"] in {"internal", "polymarket", "kalshi", "external"}
 
 
 def test_live_events_api_source_filter(client):

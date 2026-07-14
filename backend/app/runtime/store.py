@@ -72,6 +72,7 @@ class TraderSession:
     provider: str = "internal"
     kalshi_market_tickers: list[str] = field(default_factory=list)
     demo_account_id: str | None = None
+    external_markets: dict[str, dict] = field(default_factory=dict)
     journal: list[JournalRecord] = field(default_factory=list)
     equity_curve: list[dict[str, float | int]] = field(default_factory=list)
     daily_pnl: float = 0.0
@@ -124,6 +125,14 @@ class TradingStore:
     def market_prices(self) -> dict[str, list[float]]:
         with self._lock:
             return {mid: [m.yes_price, 1 - m.yes_price] for mid, m in self._markets.items()}
+
+    def market_prices_for_session(self, session: TraderSession) -> dict[str, list[float]]:
+        """LMSR prices merged with cached external (Kalshi/Polymarket) quotes."""
+        prices = self.market_prices()
+        for market_id, meta in session.external_markets.items():
+            yes = float(meta.get("yesPrice") or 0.5)
+            prices[market_id] = [yes, 1.0 - yes]
+        return prices
 
     def apply_price_tick(self, market_id: str, yes_price: float) -> None:
         """Sync LMSR state to an external tick (WebSocket broadcaster)."""
@@ -359,6 +368,131 @@ class TradingStore:
                     "side": side,
                     "shares": shares,
                     "price": price,
+                    "filledAt": now_ms(),
+                },
+                "position": position,
+            }
+
+    def place_external_order(
+        self,
+        session: TraderSession,
+        *,
+        market_id: str,
+        market_question: str,
+        outcome: str,
+        side: str,
+        shares: int,
+        yes_price: float,
+        category: str = "economics",
+    ) -> dict:
+        """Virtual fill at an external provider price (Kalshi, etc.)."""
+        if shares <= 0:
+            raise ValueError("Shares must be positive")
+
+        yes_price = _clamp_price(yes_price)
+        outcome_idx = 0 if outcome == "yes" else 1
+        fill_price = yes_price if outcome_idx == 0 else (1.0 - yes_price)
+        fee_rate = 0.01
+
+        with session._lock:
+            if session.risk.status is not ChallengeStatus.ACTIVE:
+                raise ValueError(f"Challenge is {session.risk.status.value}; trading closed")
+
+            gross = fill_price * shares
+            fee = gross * fee_rate
+
+            if side == "buy":
+                decision = session.risk.check_order(
+                    OrderIntent(
+                        market_id=market_id,
+                        stake=gross + fee,
+                        current_market_exposure=session.bankroll.market_exposure(market_id),
+                        current_total_exposure=session.bankroll.total_exposure(),
+                    )
+                )
+                if not decision.allowed:
+                    raise ValueError("; ".join(decision.reasons) or "Order rejected by risk engine")
+                try:
+                    session.bankroll.apply_buy(
+                        market_id,
+                        outcome=outcome_idx,
+                        shares=shares,
+                        gross_value=gross,
+                        fee=fee,
+                    )
+                except InsufficientFunds as exc:
+                    raise ValueError("Insufficient balance") from exc
+            else:
+                try:
+                    session.bankroll.apply_sell(
+                        market_id,
+                        outcome=outcome_idx,
+                        shares=shares,
+                        gross_value=gross,
+                        fee=fee,
+                    )
+                except InsufficientShares as exc:
+                    raise ValueError("Not enough shares to sell") from exc
+
+            session.external_markets[market_id] = {
+                "id": market_id,
+                "question": market_question,
+                "category": category,
+                "yesPrice": yes_price,
+                "source": "kalshi" if market_id.startswith("kalshi-") else "external",
+            }
+
+            prices = self.market_prices_for_session(session)
+            snap = session.bankroll.mark_to_market(prices)
+            session.risk.on_equity(snap.equity, traded=True)
+            session.record_equity()
+
+            order_id = f"ord-{uuid.uuid4().hex[:8]}"
+            session.journal.insert(
+                0,
+                JournalRecord(
+                    id=f"jnl-{uuid.uuid4().hex[:8]}",
+                    kind="trade",
+                    market_id=market_id,
+                    market_question=market_question,
+                    outcome=outcome,
+                    side=side,
+                    shares=float(shares),
+                    price=fill_price,
+                    pnl=None,
+                    note="",
+                    tags=["kalshi"] if market_id.startswith("kalshi-") else ["external"],
+                    executed_at=now_ms(),
+                ),
+            )
+
+            pos = next(
+                (
+                    p
+                    for p in session.bankroll.positions()
+                    if p.market_id == market_id and p.outcome == outcome_idx
+                ),
+                None,
+            )
+            position = None
+            if pos and pos.shares > 0:
+                position = {
+                    "id": f"pos-{market_id}-{outcome}",
+                    "marketId": market_id,
+                    "outcome": outcome,
+                    "shares": pos.shares,
+                    "avgPrice": pos.avg_price,
+                    "openedAt": now_ms(),
+                }
+
+            return {
+                "order": {
+                    "id": order_id,
+                    "marketId": market_id,
+                    "outcome": outcome,
+                    "side": side,
+                    "shares": shares,
+                    "price": fill_price,
                     "filledAt": now_ms(),
                 },
                 "position": position,

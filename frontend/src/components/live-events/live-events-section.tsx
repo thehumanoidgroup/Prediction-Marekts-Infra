@@ -15,6 +15,8 @@ function sectionTitle(source: MarketViewSource): string {
       return "Live Events · Internal";
     case "polymarket":
       return "Live Events · Polymarket";
+    case "kalshi":
+      return "Live Events · Kalshi";
     default:
       return "Live Events";
   }
@@ -26,8 +28,10 @@ function sectionSubtitle(source: MarketViewSource): string {
       return "PropPredict LMSR simulation markets";
     case "polymarket":
       return "Live odds from Polymarket CLOB";
+    case "kalshi":
+      return "Live odds from Kalshi";
     default:
-      return "Internal LMSR + live Polymarket in one feed";
+      return "Internal LMSR + live external feeds";
   }
 }
 
@@ -41,6 +45,7 @@ function LiveEventsSectionBody() {
       : {
           internal: events.filter((event) => event.source === "internal").length,
           polymarket: events.filter((event) => event.source === "polymarket").length,
+          kalshi: events.filter((event) => event.source === "kalshi").length,
         };
 
   const isLoading = payload.status === "loading";
@@ -49,9 +54,11 @@ function LiveEventsSectionBody() {
   const viewAllHref =
     source === "polymarket"
       ? "/markets?source=polymarket"
-      : source === "internal"
-        ? "/markets?source=internal"
-        : "/markets";
+      : source === "kalshi"
+        ? "/markets?source=kalshi"
+        : source === "internal"
+          ? "/markets?source=internal"
+          : "/markets";
 
   return (
     <Card>
@@ -59,7 +66,7 @@ function LiveEventsSectionBody() {
         title={sectionTitle(source)}
         subtitle={
           source === "all"
-            ? `${sectionSubtitle(source)} · ${counts.internal} Internal · ${counts.polymarket} Polymarket`
+            ? `${sectionSubtitle(source)} · ${counts.internal} Internal · ${counts.polymarket} Poly · ${counts.kalshi ?? 0} Kalshi`
             : sectionSubtitle(source)
         }
         action={

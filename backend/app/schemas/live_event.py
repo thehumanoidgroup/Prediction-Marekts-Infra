@@ -39,7 +39,7 @@ class LiveEventListResponse(BaseModel):
     events: list[LiveEventResponse]
     count: int
     counts: dict[str, int] = Field(
-        default_factory=lambda: {"internal": 0, "polymarket": 0, "external": 0},
+        default_factory=lambda: {"internal": 0, "polymarket": 0, "kalshi": 0, "external": 0},
         description="Event counts by source in the current result set",
     )
     source: str = Field(default="all", description="Applied source filter")

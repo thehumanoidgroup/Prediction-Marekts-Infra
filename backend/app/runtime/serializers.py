@@ -58,7 +58,7 @@ def serialize_journal(entry: JournalRecord) -> dict:
 
 
 def serialize_account(session: TraderSession, store: TradingStore) -> dict:
-    prices = store.market_prices()
+    prices = store.market_prices_for_session(session)
     snap = session.bankroll.mark_to_market(prices)
     progress = session.risk.progress()
     limits = session.risk.limits
@@ -130,18 +130,38 @@ def serialize_account(session: TraderSession, store: TradingStore) -> dict:
 
 
 def serialize_position(session: TraderSession, store: TradingStore) -> list[dict]:
-    prices = store.market_prices()
+    prices = store.market_prices_for_session(session)
     enriched = []
     for pos in session.bankroll.positions():
         market = store.get_market(pos.market_id)
-        if market is None:
-            continue
         outcome = "yes" if pos.outcome == 0 else "no"
         market_prices = prices.get(pos.market_id, [0.5, 0.5])
         current = market_prices[pos.outcome]
         value = current * pos.shares
         cost = pos.avg_price * pos.shares
         pnl = value - cost
+
+        if market is not None:
+            market_payload = serialize_market(market)
+        else:
+            meta = session.external_markets.get(pos.market_id, {})
+            yes_price = float(meta.get("yesPrice") or market_prices[0])
+            market_payload = {
+                "id": pos.market_id,
+                "question": str(meta.get("question") or pos.market_id),
+                "category": str(meta.get("category") or "economics"),
+                "status": "open",
+                "yesPrice": yes_price,
+                "change24h": 0.0,
+                "volume": 0.0,
+                "volume24h": 0.0,
+                "openInterest": 0.0,
+                "traders": 0,
+                "closesAt": now_ms() + 30 * 24 * 3_600_000,
+                "history": [],
+                "source": meta.get("source", "kalshi"),
+            }
+
         enriched.append(
             {
                 "id": f"pos-{pos.market_id}-{outcome}",
@@ -150,7 +170,7 @@ def serialize_position(session: TraderSession, store: TradingStore) -> list[dict
                 "shares": pos.shares,
                 "avgPrice": pos.avg_price,
                 "openedAt": now_ms(),
-                "market": serialize_market(market),
+                "market": market_payload,
                 "currentPrice": current,
                 "value": value,
                 "cost": cost,
@@ -162,7 +182,7 @@ def serialize_position(session: TraderSession, store: TradingStore) -> list[dict
 
 
 def serialize_portfolio_summary(session: TraderSession, store: TradingStore) -> dict:
-    prices = store.market_prices()
+    prices = store.market_prices_for_session(session)
     snap = session.bankroll.mark_to_market(prices)
     positions = serialize_position(session, store)
     open_pnl = sum(p["pnl"] for p in positions)
