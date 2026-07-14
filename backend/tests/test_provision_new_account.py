@@ -93,7 +93,7 @@ async def test_provision_new_account_kalshi_new_trader(
 
     program = result.account.to_program_dict()
     assert program["provider"] == "kalshi"
-    assert program["model_type"] == "evaluation"
+    assert program["model_type"] == "1step"
 
 
 @pytest.mark.asyncio

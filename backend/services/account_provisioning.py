@@ -29,6 +29,11 @@ from app.models import (
 from app.models.tenant import DEFAULT_PROGRAM
 from integrations.kalshi import KalshiClient
 from integrations.kalshi.kalshi_service import normalize_kalshi_market
+from services.challenge_presets import (
+    MODEL_TYPE_PRESETS,
+    challenge_config_to_dict,
+    resolve_challenge_rules,
+)
 from services.email_service import AccountCredentialsEmail, send_account_credentials_email
 
 logger = logging.getLogger(__name__)
@@ -61,6 +66,215 @@ class ProvisionResult:
     temporary_password: str | None
     email_sent: bool
     kalshi_market_tickers: list[str]
+    applied_rules: dict[str, Any]
+
+
+def _rules_to_preview(rules: dict[str, Any], *, model_type: str, account_size: float) -> dict[str, Any]:
+    return {
+        "model_type": model_type,
+        "account_size": account_size,
+        "currency": rules.get("currency", "USD"),
+        "profit_target_pct": float(rules.get("profit_target_pct", 10)),
+        "max_daily_loss_pct": float(rules.get("max_daily_loss_pct", 5)),
+        "max_drawdown_pct": float(rules.get("max_drawdown_pct", 10)),
+        "drawdown_mode": str(rules.get("drawdown_mode", "static")),
+        "max_stake_per_order": rules.get("max_stake_per_order"),
+        "max_exposure_per_market": rules.get("max_exposure_per_market"),
+        "max_total_exposure": rules.get("max_total_exposure"),
+        "min_consistency_score": rules.get("min_consistency_score"),
+        "min_trading_days": int(rules.get("min_trading_days", 10)),
+        "challenge_duration_days": int(rules.get("challenge_duration_days", 60)),
+        "profit_split_pct": float(rules.get("profit_split_pct", 80)),
+        "provider": str(rules.get("provider", "kalshi")),
+    }
+
+
+async def _load_template_config(
+    db: AsyncSession,
+    tenant_id: str,
+    template_config_id: str | None,
+) -> ChallengeConfig | None:
+    if not template_config_id:
+        return None
+    result = await db.execute(
+        select(ChallengeConfig).where(
+            ChallengeConfig.id == template_config_id,
+            ChallengeConfig.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def preview_issuance_rules(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    provider: MarketProvider,
+    account_size: int,
+    model_type: str = "1step",
+    template_config_id: str | None = None,
+    challenge_rules: dict[str, Any] | None = None,
+    prop_firm_account_slug: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the challenge rules that would apply for an issuance."""
+    if provider is MarketProvider.KALSHI:
+        await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
+
+    product: PropFirmAccount | None = None
+    if prop_firm_account_slug:
+        product = await get_prop_firm_account_by_slug(db, tenant.id, prop_firm_account_slug)
+    if product is None and provider is not MarketProvider.INTERNAL:
+        product = await get_prop_firm_account_for_provider(db, tenant.id, provider)
+    if product is None:
+        product = await get_default_prop_firm_account(db, tenant.id)
+    if product is None:
+        product = await ensure_tenant_account_catalog(
+            db, tenant, include_kalshi=provider is MarketProvider.KALSHI
+        )
+
+    loaded = await db.execute(
+        select(PropFirmAccount)
+        .where(PropFirmAccount.id == product.id)
+        .options(selectinload(PropFirmAccount.challenge_config))
+    )
+    product = loaded.scalar_one()
+
+    template = await _load_template_config(db, tenant.id, template_config_id)
+    base = challenge_config_to_dict(template or product.challenge_config)
+    base["provider"] = provider.value
+
+    resolved = resolve_challenge_rules(
+        base=base,
+        model_type=model_type,
+        account_size=float(account_size),
+        overrides=challenge_rules,
+    )
+    return _rules_to_preview(resolved, model_type=model_type, account_size=float(account_size))
+
+
+async def _create_issuance_challenge_config(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    product: PropFirmAccount,
+    provider: MarketProvider,
+    account_size: float,
+    model_type: str,
+    template_config_id: str | None,
+    challenge_rules: dict[str, Any] | None,
+) -> ChallengeConfig:
+    template = await _load_template_config(db, tenant.id, template_config_id)
+    base = challenge_config_to_dict(template or product.challenge_config)
+    base["provider"] = provider.value
+
+    resolved = resolve_challenge_rules(
+        base=base,
+        model_type=model_type,
+        account_size=account_size,
+        overrides=challenge_rules,
+    )
+
+    label = f"Kalshi {model_type.upper()} ${int(account_size / 1000)}K"
+    config = ChallengeConfig(
+        tenant_id=tenant.id,
+        name=label,
+        provider=provider,
+        currency=str(resolved.get("currency", "USD")),
+        starting_balance=account_size,
+        profit_target_pct=float(resolved["profit_target_pct"]),
+        max_daily_loss_pct=float(resolved["max_daily_loss_pct"]),
+        max_drawdown_pct=float(resolved["max_drawdown_pct"]),
+        drawdown_mode=str(resolved.get("drawdown_mode", "static")),
+        profit_split_pct=float(resolved.get("profit_split_pct", 80)),
+        max_stake_per_order=resolved.get("max_stake_per_order"),
+        max_exposure_per_market=resolved.get("max_exposure_per_market"),
+        max_total_exposure=resolved.get("max_total_exposure"),
+        challenge_duration_days=int(resolved.get("challenge_duration_days", 60)),
+        min_trading_days=int(resolved.get("min_trading_days", 10)),
+        model_type=model_type,
+        min_consistency_score=resolved.get("min_consistency_score"),
+        kalshi_market_tickers=product.kalshi_market_tickers or product.challenge_config.kalshi_market_tickers,
+    )
+    db.add(config)
+    await db.flush()
+    return config
+
+
+async def list_challenge_templates(
+    db: AsyncSession,
+    *,
+    tenant_id: str,
+    provider: MarketProvider | None = None,
+) -> list[dict[str, Any]]:
+    """List reusable challenge configs and firm products for template copy."""
+    stmt = (
+        select(PropFirmAccount)
+        .where(PropFirmAccount.tenant_id == tenant_id, PropFirmAccount.is_active.is_(True))
+        .options(selectinload(PropFirmAccount.challenge_config))
+        .order_by(PropFirmAccount.is_default.desc(), PropFirmAccount.label)
+    )
+    if provider is not None:
+        stmt = stmt.where(PropFirmAccount.provider == provider)
+
+    result = await db.execute(stmt)
+    templates: list[dict[str, Any]] = []
+    for product in result.scalars().all():
+        cfg = product.challenge_config
+        rules = _rules_to_preview(
+            challenge_config_to_dict(cfg),
+            model_type=cfg.model_type,
+            account_size=float(cfg.starting_balance),
+        )
+        templates.append(
+            {
+                "id": cfg.id,
+                "name": cfg.name,
+                "provider": cfg.provider.value,
+                "prop_firm_account_id": product.id,
+                "prop_firm_slug": product.slug,
+                "prop_firm_label": product.label,
+                "rules": rules,
+            }
+        )
+    return templates
+
+
+def list_model_type_presets(*, account_size: int = 25_000, provider: str = "kalshi") -> list[dict[str, Any]]:
+    """Built-in model type presets for the issuance UI."""
+    labels = {
+        "1step": ("1-Step Evaluation", "Single phase · standard profit target"),
+        "2step": ("2-Step Evaluation", "Verification phase · tighter drawdown"),
+        "3step": ("3-Step Evaluation", "Extended evaluation · consistency required"),
+        "instant": ("Instant Funding", "Accelerated path · higher target"),
+    }
+    base = {
+        "currency": "USD",
+        "starting_balance": float(account_size),
+        "max_stake_per_order": 2500.0,
+        "max_exposure_per_market": 5000.0,
+        "max_total_exposure": None,
+        "provider": provider,
+    }
+    presets: list[dict[str, Any]] = []
+    for model_type, fields in MODEL_TYPE_PRESETS.items():
+        resolved = resolve_challenge_rules(
+            base={**base, **fields},
+            model_type=model_type,
+            account_size=float(account_size),
+            overrides=None,
+        )
+        label, desc = labels.get(model_type, (model_type, ""))
+        presets.append(
+            {
+                "model_type": model_type,
+                "label": label,
+                "description": desc,
+                "rules": _rules_to_preview(
+                    resolved, model_type=model_type, account_size=float(account_size)
+                ),
+            }
+        )
+    return presets
 
 
 def _program_to_challenge_fields(program: dict[str, Any]) -> dict[str, Any]:
@@ -386,6 +600,8 @@ async def _upsert_trader_demo_account(
     account_size: float,
     kalshi_tickers: list[str] | None,
     replace_existing: bool,
+    challenge_config_id: str | None = None,
+    model_type: str | None = None,
 ) -> TraderDemoAccount:
     result = await db.execute(
         select(TraderDemoAccount)
@@ -402,16 +618,17 @@ async def _upsert_trader_demo_account(
         return existing
 
     config = product.challenge_config
-    model_type = config.model_type
+    resolved_model_type = model_type or config.model_type
+    config_id = challenge_config_id or product.challenge_config_id
     ticker_list = list(kalshi_tickers) if kalshi_tickers else None
 
     if existing is not None:
         existing.prop_firm_account_id = product.id
-        existing.challenge_config_id = product.challenge_config_id
+        existing.challenge_config_id = config_id
         existing.provider = provider
         existing.starting_balance = account_size
         existing.virtual_balance = account_size
-        existing.model_type = model_type
+        existing.model_type = resolved_model_type
         existing.kalshi_market_tickers = ticker_list
         existing.status = ChallengeStatus.ACTIVE
         account = existing
@@ -420,11 +637,11 @@ async def _upsert_trader_demo_account(
             tenant_id=tenant.id,
             user_id=user.id,
             prop_firm_account_id=product.id,
-            challenge_config_id=product.challenge_config_id,
+            challenge_config_id=config_id,
             provider=provider,
             starting_balance=account_size,
             virtual_balance=account_size,
-            model_type=model_type,
+            model_type=resolved_model_type,
             kalshi_market_tickers=ticker_list,
             status=ChallengeStatus.ACTIVE,
         )
@@ -499,6 +716,9 @@ async def provision_new_account(
     issued_by_user_id: str | None = None,
     send_credentials_email: bool = True,
     metadata: dict[str, Any] | None = None,
+    model_type: str = "1step",
+    template_config_id: str | None = None,
+    challenge_rules: dict[str, Any] | None = None,
 ) -> ProvisionResult:
     """Provision a trader evaluation account (new or existing user).
 
@@ -535,15 +755,40 @@ async def provision_new_account(
         .options(selectinload(PropFirmAccount.challenge_config))
     )
     product = loaded.scalar_one()
-    config = product.challenge_config
+
+    issuance_config: ChallengeConfig | None = None
+    if template_config_id or challenge_rules or model_type not in {product.challenge_config.model_type, "evaluation"}:
+        issuance_config = await _create_issuance_challenge_config(
+            db,
+            tenant=tenant,
+            product=product,
+            provider=resolved_provider,
+            account_size=account_size_f,
+            model_type=model_type,
+            template_config_id=template_config_id,
+            challenge_rules=challenge_rules,
+        )
+
+    applied_rules = await preview_issuance_rules(
+        db,
+        tenant=tenant,
+        provider=resolved_provider,
+        account_size=int(account_size_f),
+        model_type=model_type,
+        template_config_id=template_config_id,
+        challenge_rules=challenge_rules,
+        prop_firm_account_slug=prop_firm_account_slug,
+    )
 
     kalshi_tickers: list[str] = []
     if resolved_provider is MarketProvider.KALSHI:
         kalshi_tickers = await fetch_kalshi_live_markets(categories=kalshi_categories)
     elif product.kalshi_market_tickers:
         kalshi_tickers = list(product.kalshi_market_tickers)
-    elif config.kalshi_market_tickers:
-        kalshi_tickers = list(config.kalshi_market_tickers)
+    elif issuance_config and issuance_config.kalshi_market_tickers:
+        kalshi_tickers = list(issuance_config.kalshi_market_tickers)
+    elif product.challenge_config.kalshi_market_tickers:
+        kalshi_tickers = list(product.challenge_config.kalshi_market_tickers)
 
     generate_credentials = issuance_source in {
         IssuanceSource.WEBHOOK,
@@ -566,6 +811,8 @@ async def provision_new_account(
         account_size=account_size_f,
         kalshi_tickers=kalshi_tickers,
         replace_existing=replace_existing,
+        challenge_config_id=issuance_config.id if issuance_config else None,
+        model_type=model_type,
     )
 
     from app.core.config import get_settings
@@ -604,7 +851,7 @@ async def provision_new_account(
         provider=resolved_provider,
         issuance_source=issuance_source,
         account_size=account_size_f,
-        model_type=config.model_type,
+        model_type=model_type,
         kalshi_tickers=account.effective_kalshi_tickers(),
         credentials_generated=bool(temporary_password),
         email_sent=email_sent,
@@ -621,6 +868,7 @@ async def provision_new_account(
         temporary_password=temporary_password,
         email_sent=email_sent,
         kalshi_market_tickers=account.effective_kalshi_tickers(),
+        applied_rules=applied_rules,
     )
 
 

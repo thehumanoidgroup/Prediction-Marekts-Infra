@@ -32,6 +32,7 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
     { href: "/admin", label: "Overview", icon: "shield", exact: true },
     { href: "/admin/challenges", label: "Challenge rules", icon: "sliders" },
     { href: "/admin/traders", label: "Traders", icon: "users" },
+    { href: "/admin/accounts", label: "Accounts", icon: "shield" },
     { href: "/admin/branding", label: "Branding", icon: "palette" },
     { href: "/admin/markets", label: "Market templates", icon: "markets" },
   ];

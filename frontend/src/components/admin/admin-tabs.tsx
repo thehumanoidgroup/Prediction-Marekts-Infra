@@ -8,6 +8,7 @@ const tabs = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/challenges", label: "Challenge rules" },
   { href: "/admin/traders", label: "Traders" },
+  { href: "/admin/accounts", label: "Accounts" },
   { href: "/admin/branding", label: "Branding" },
   { href: "/admin/markets", label: "Market templates" },
 ];

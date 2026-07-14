@@ -1,0 +1,507 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ACCOUNT_SIZES,
+  MODEL_TYPES,
+  type ChallengeRules,
+  type ChallengeRulesInput,
+  type ChallengeTemplate,
+  type ModelType,
+  type ProvisionResult,
+} from "@/lib/account-provisioning";
+import { formatCompactUsd } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ChallengeRulesPreview } from "@/components/admin/challenge-rules-preview";
+import { IconClose } from "@/components/ui/icons";
+import { cn } from "@/lib/utils";
+
+const inputClass =
+  "h-10 w-full rounded-lg border border-edge bg-surface-2 px-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-accent/50 focus:ring-1 focus:ring-accent/30";
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      {children}
+      {hint ? <span className="mt-1 block text-[10px] text-faint">{hint}</span> : null}
+    </label>
+  );
+}
+
+function IssuanceSuccess({
+  result,
+  onClose,
+  onIssueAnother,
+}: {
+  result: ProvisionResult;
+  onClose: () => void;
+  onIssueAnother: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-xl border border-up/30 bg-up-soft/40 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-up">Account issued successfully</p>
+            <p className="mt-1 text-xs text-muted">
+              {result.display_name} · {result.email}
+            </p>
+          </div>
+          <Badge tone="up">Kalshi</Badge>
+        </div>
+      </div>
+
+      <dl className="grid gap-2 rounded-xl border border-edge bg-surface-2 p-4 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-muted">Account size</dt>
+          <dd className="tabular font-semibold">{formatCompactUsd(result.account_size)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Model</dt>
+          <dd className="font-semibold uppercase">{result.model_type}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Credentials email</dt>
+          <dd className="font-semibold">{result.email_sent ? "Sent" : "Not sent"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">New user</dt>
+          <dd className="font-semibold">{result.created_user ? "Yes" : "Existing trader"}</dd>
+        </div>
+        {result.temporary_password ? (
+          <div className="sm:col-span-2">
+            <dt className="text-muted">Temporary password</dt>
+            <dd className="mt-1 rounded-md bg-surface px-2 py-1 font-mono text-sm">
+              {result.temporary_password}
+            </dd>
+          </div>
+        ) : null}
+        {result.kalshi_market_tickers.length > 0 ? (
+          <div className="sm:col-span-2">
+            <dt className="text-muted">Kalshi markets linked</dt>
+            <dd className="mt-1 text-[11px] text-faint">
+              {result.kalshi_market_tickers.slice(0, 5).join(", ")}
+              {result.kalshi_market_tickers.length > 5 ? "…" : ""}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href={`/admin/traders?account=${result.account_id}`}
+          className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-sm font-semibold text-accent-foreground hover:bg-accent-hover"
+        >
+          View TraderDemoAccount
+        </Link>
+        <Button variant="secondary" onClick={onIssueAnother}>
+          Issue another
+        </Button>
+        <Button variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Full Kalshi demo account issuance flow for Prop Firm Admins. */
+export function KalshiIssuancePanel({
+  open,
+  onClose,
+  onIssued,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onIssued?: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [accountSize, setAccountSize] = useState<number>(25_000);
+  const [modelType, setModelType] = useState<ModelType>("1step");
+  const [templateId, setTemplateId] = useState<string>("");
+  const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customRules, setCustomRules] = useState<ChallengeRulesInput>({});
+  const [preview, setPreview] = useState<ChallengeRules | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ProvisionResult | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const response = await fetch("/api/admin/accounts/templates?provider=kalshi");
+        if (response.ok) {
+          setTemplates((await response.json()) as ChallengeTemplate[]);
+        }
+      } catch {
+        /* templates optional */
+      }
+    })();
+  }, [open]);
+
+  const previewPayload = useMemo(
+    () => ({
+      provider: "kalshi",
+      account_size: accountSize,
+      model_type: modelType,
+      template_config_id: templateId || undefined,
+      challenge_rules: Object.keys(customRules).length ? customRules : undefined,
+    }),
+    [accountSize, modelType, templateId, customRules],
+  );
+
+  const loadPreview = useCallback(async () => {
+    setPreviewLoading(true);
+    try {
+      const response = await fetch("/api/admin/accounts/preview-rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(previewPayload),
+      });
+      if (!response.ok) throw new Error("Preview failed");
+      setPreview((await response.json()) as ChallengeRules);
+    } catch {
+      setPreview(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [previewPayload]);
+
+  useEffect(() => {
+    if (!open || result) return;
+    const timer = setTimeout(() => void loadPreview(), 300);
+    return () => clearTimeout(timer);
+  }, [open, result, loadPreview]);
+
+  function applyTemplate(id: string) {
+    setTemplateId(id);
+    const template = templates.find((t) => t.id === id);
+    if (!template) return;
+    setModelType(template.rules.model_type as ModelType);
+    setCustomRules({
+      profit_target_pct: template.rules.profit_target_pct,
+      max_daily_loss_pct: template.rules.max_daily_loss_pct,
+      max_drawdown_pct: template.rules.max_drawdown_pct,
+      drawdown_mode: template.rules.drawdown_mode as ChallengeRulesInput["drawdown_mode"],
+      max_stake_per_order: template.rules.max_stake_per_order ?? undefined,
+      max_exposure_per_market: template.rules.max_exposure_per_market ?? undefined,
+      min_consistency_score: template.rules.min_consistency_score ?? undefined,
+      min_trading_days: template.rules.min_trading_days,
+      challenge_duration_days: template.rules.challenge_duration_days,
+      profit_split_pct: template.rules.profit_split_pct,
+    });
+  }
+
+  async function submit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/accounts/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          display_name: displayName || undefined,
+          provider: "kalshi",
+          account_size: accountSize,
+          model_type: modelType,
+          template_config_id: templateId || undefined,
+          challenge_rules: Object.keys(customRules).length ? customRules : undefined,
+          send_credentials_email: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail ?? data.error ?? "Issuance failed");
+      }
+      setResult(data as ProvisionResult);
+      onIssued?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not issue account");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function reset() {
+    setResult(null);
+    setEmail("");
+    setDisplayName("");
+    setAccountSize(25_000);
+    setModelType("1step");
+    setTemplateId("");
+    setCustomRules({});
+    setCustomOpen(false);
+    setError(null);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Issue Kalshi demo account"
+    >
+      <div
+        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl border border-edge bg-surface shadow-2xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Issue New Kalshi Demo Account</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Virtual evaluation account · live Kalshi market data
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => {
+              reset();
+              onClose();
+            }}
+            className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2"
+          >
+            <IconClose />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {result ? (
+            <IssuanceSuccess
+              result={result}
+              onClose={() => {
+                reset();
+                onClose();
+              }}
+              onIssueAnother={reset}
+            />
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-5">
+              <div className="flex flex-col gap-5 lg:col-span-3">
+                <section>
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                    Trader details
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Trader email" hint="Login credentials sent here">
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className={inputClass}
+                        placeholder="trader@example.com"
+                      />
+                    </Field>
+                    <Field label="Display name">
+                      <input
+                        type="text"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        className={inputClass}
+                        placeholder="Optional"
+                      />
+                    </Field>
+                    <Field label="Account size">
+                      <select
+                        value={accountSize}
+                        onChange={(e) => setAccountSize(Number(e.target.value))}
+                        className={inputClass}
+                      >
+                        {ACCOUNT_SIZES.map((size) => (
+                          <option key={size} value={size}>
+                            {formatCompactUsd(size)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Provider">
+                      <input
+                        type="text"
+                        value="Kalshi"
+                        disabled
+                        className={cn(inputClass, "opacity-70")}
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                    Model type
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {MODEL_TYPES.map((model) => (
+                      <button
+                        key={model.id}
+                        type="button"
+                        onClick={() => setModelType(model.id)}
+                        className={cn(
+                          "rounded-xl border px-3 py-3 text-left transition-all",
+                          modelType === model.id
+                            ? "border-accent/60 bg-accent-soft shadow-[inset_0_0_0_1px_rgba(34,197,94,0.12)]"
+                            : "border-edge bg-surface-2 hover:border-edge-strong",
+                        )}
+                      >
+                        <span className="block text-xs font-bold">{model.label}</span>
+                        <span className="mt-0.5 block text-[10px] text-faint">{model.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {templates.length > 0 ? (
+                  <section>
+                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                      Copy from template
+                    </h3>
+                    <select
+                      value={templateId}
+                      onChange={(e) => applyTemplate(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="">— Select existing template —</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.prop_firm_label ?? t.name} ({t.rules.model_type})
+                        </option>
+                      ))}
+                    </select>
+                  </section>
+                ) : null}
+
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setCustomOpen((v) => !v)}
+                    className="text-xs font-semibold text-accent hover:underline"
+                  >
+                    {customOpen ? "Hide custom rules" : "Customize challenge rules"}
+                  </button>
+                  {customOpen ? (
+                    <div className="mt-3 grid gap-3 rounded-xl border border-edge bg-surface-2 p-4 sm:grid-cols-2">
+                      {(
+                        [
+                          ["profit_target_pct", "Profit target %", 1, 100],
+                          ["max_daily_loss_pct", "Max daily loss %", 1, 100],
+                          ["max_drawdown_pct", "Max drawdown %", 1, 100],
+                          ["max_stake_per_order", "Max bet / pick ($)", 1, 500_000],
+                          ["max_exposure_per_market", "Max exposure / market ($)", 1, 1_000_000],
+                          ["min_consistency_score", "Consistency (0–1)", 0, 1],
+                          ["min_trading_days", "Min trading days", 0, 365],
+                          ["challenge_duration_days", "Duration (days)", 1, 730],
+                          ["profit_split_pct", "Profit split %", 1, 100],
+                        ] as const
+                      ).map(([key, label, min, max]) => (
+                        <Field key={key} label={label}>
+                          <input
+                            type="number"
+                            min={min}
+                            max={max}
+                            step={key === "min_consistency_score" ? 0.01 : 1}
+                            value={
+                              customRules[key as keyof ChallengeRulesInput] ?? ""
+                            }
+                            onChange={(e) => {
+                              const val = e.target.valueAsNumber;
+                              setCustomRules((r) => ({
+                                ...r,
+                                [key]: Number.isFinite(val) ? val : undefined,
+                              }));
+                            }}
+                            className={inputClass}
+                          />
+                        </Field>
+                      ))}
+                      <Field label="Drawdown mode">
+                        <select
+                          value={customRules.drawdown_mode ?? "static"}
+                          onChange={(e) =>
+                            setCustomRules((r) => ({
+                              ...r,
+                              drawdown_mode: e.target.value as ChallengeRulesInput["drawdown_mode"],
+                            }))
+                          }
+                          className={inputClass}
+                        >
+                          <option value="static">Static</option>
+                          <option value="trailing">Trailing</option>
+                          <option value="absolute">Absolute</option>
+                        </select>
+                      </Field>
+                    </div>
+                  ) : null}
+                </section>
+
+                {error ? (
+                  <p className="rounded-lg bg-down-soft px-3 py-2 text-sm text-down">{error}</p>
+                ) : null}
+              </div>
+
+              <div className="lg:col-span-2">
+                <ChallengeRulesPreview rules={previewLoading ? null : preview} />
+                {previewLoading ? (
+                  <p className="mt-2 text-center text-[11px] text-faint">Updating preview…</p>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {!result ? (
+          <div className="flex items-center justify-end gap-2 border-t border-edge px-5 py-4">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              disabled={submitting || !email.trim()}
+              onClick={() => void submit()}
+              className="min-w-[160px]"
+            >
+              {submitting ? "Issuing…" : "Issue Kalshi account"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Trigger + modal wrapper for Kalshi issuance. */
+export function IssueKalshiAccountButton({ onIssued }: { onIssued?: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        onClick={() => setOpen(true)}
+        className="shadow-[0_0_24px_-6px_var(--tenant-accent)]"
+      >
+        Issue New Kalshi Demo Account
+      </Button>
+      <KalshiIssuancePanel
+        open={open}
+        onClose={() => setOpen(false)}
+        onIssued={onIssued}
+      />
+    </>
+  );
+}
