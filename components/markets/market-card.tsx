@@ -18,6 +18,8 @@ const categoryLabels: Record<Market["category"], string> = {
   commodities: "Commodities",
   economics: "Economics",
   indices: "Indices",
+  sports: "Sports",
+  politics: "Politics",
 };
 
 const categoryAccent: Record<Market["category"], string> = {
@@ -27,6 +29,8 @@ const categoryAccent: Record<Market["category"], string> = {
   commodities: "border-l-[#f97316]",
   economics: "border-l-[#22c55e]",
   indices: "border-l-[#ec4899]",
+  sports: "border-l-[#38bdf8]",
+  politics: "border-l-[#a78bfa]",
 };
 
 export function MarketCard({ market }: { market: Market }) {

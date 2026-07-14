@@ -109,7 +109,7 @@ export function SoldAccountsTable() {
         <tbody>
           {filtered.map((row) => (
             <tr key={row.id} className="border-b border-edge/60 last:border-0 hover:bg-surface-2/60">
-              <td className="py-3 pr-4 text-muted">{formatDate(row.created_at)}</td>
+              <td className="py-3 pr-4 text-muted">{formatDate(Date.parse(row.created_at))}</td>
               <td className="py-3 pr-4 font-mono text-[11px] text-faint">
                 {row.trader_demo_account_id ?? "—"}
               </td>

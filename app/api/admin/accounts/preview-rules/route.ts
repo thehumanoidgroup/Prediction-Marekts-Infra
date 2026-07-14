@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/backend";
 import { getRequestTenant } from "@/lib/tenant-server";
+import { ensureSeeded } from "@/lib/seed";
+import { provisioningDbUnavailable } from "@/lib/provisioning/route-auth";
+import {
+  challengeConfigToRules,
+  fromApiModelTypeLoose,
+  numericAccountSizeToApi,
+} from "@/lib/provisioning/kalshi-admin";
+import { getOrCreateFirmSettings } from "@/lib/provisioning/firm-settings";
+import { resolveChallengeConfigForAccount } from "@/services/account-provisioning";
 
 export async function POST(request: NextRequest) {
-  const base = getBackendUrl();
-  if (!base) {
-    return NextResponse.json({ error: "Backend not configured" }, { status: 503 });
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 
-  const tenant = await getRequestTenant();
   let body: unknown;
   try {
     body = await request.json();
@@ -16,17 +22,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  try {
-    const response = await fetch(`${base}/api/v1/admin/accounts/preview-rules`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Tenant-Slug": tenant.slug,
-      },
-      body: JSON.stringify(body),
-    });
-    return NextResponse.json(await response.json(), { status: response.status });
-  } catch {
-    return NextResponse.json({ error: "Backend unavailable" }, { status: 502 });
-  }
+  const payload = (body ?? {}) as Record<string, unknown>;
+  const tenant = await getRequestTenant();
+  await ensureSeeded();
+
+  const modelType = fromApiModelTypeLoose(
+    typeof payload.model_type === "string" ? payload.model_type : "1step",
+  );
+  const accountSize = numericAccountSizeToApi(
+    typeof payload.account_size === "number" ? payload.account_size : 25_000,
+  );
+  const customRules =
+    payload.challenge_rules && typeof payload.challenge_rules === "object"
+      ? (payload.challenge_rules as Record<string, unknown>)
+      : undefined;
+
+  const firmSettings = await getOrCreateFirmSettings(tenant.id);
+  const config = resolveChallengeConfigForAccount({
+    propFirmId: tenant.id,
+    modelType,
+    accountSize,
+    customRules: {
+      provider: typeof payload.provider === "string" ? payload.provider : "kalshi",
+      ...customRules,
+    },
+    firmProgram: tenant.program,
+    firmSettings,
+  });
+
+  return NextResponse.json(
+    challengeConfigToRules(config, {
+      provider: typeof payload.provider === "string" ? payload.provider : "kalshi",
+      modelType,
+      accountSize,
+    }),
+  );
 }

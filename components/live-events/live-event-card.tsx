@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { LiveEvent } from "@/lib/types";
 import { formatCompactUsd } from "@/lib/format";
-import { useLiveEventView } from "@/lib/hooks/use-live-event-view";
+import { useLiveEventView } from "@/hooks/use-live-event-view";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { LiveProbability } from "@/components/markets/live-price";

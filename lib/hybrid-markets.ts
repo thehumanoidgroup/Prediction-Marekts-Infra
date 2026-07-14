@@ -58,23 +58,12 @@ export async function listHybridMarkets(
   }
 
   if (source === "kalshi") {
-    const base = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-    if (base) {
-      try {
-        const params = new URLSearchParams({ source: "kalshi", sort, category });
-        if (query.trim()) params.set("q", query.trim());
-        const response = await fetch(`${base.replace(/\/$/, "")}/api/v1/trading/markets?${params}`, {
-          headers: { "X-Tenant-Slug": "app" },
-          cache: "no-store",
-        });
-        if (response.ok) {
-          const data = (await response.json()) as { markets?: Market[] };
-          markets.push(...(data.markets ?? []));
-        }
-      } catch {
-        /* Kalshi feed unavailable without backend */
-      }
-    }
+    const { searchKalshiMarkets, getActiveKalshiMarkets } = await import("@/lib/kalshi/service");
+    const kalshi =
+      query.trim() && source === "kalshi"
+        ? await searchKalshiMarkets(query, refresh)
+        : await getActiveKalshiMarkets(refresh);
+    markets.push(...kalshi);
   }
 
   if (source === "all") {
@@ -111,21 +100,8 @@ export async function getHybridMarket(marketId: string): Promise<Market | null> 
   }
 
   if (marketId.toLowerCase().startsWith("kalshi-")) {
-    const base = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-    if (base) {
-      try {
-        const response = await fetch(
-          `${base.replace(/\/$/, "")}/api/v1/trading/markets/${encodeURIComponent(marketId)}`,
-          { cache: "no-store" },
-        );
-        if (response.ok) {
-          const data = (await response.json()) as { market?: Market };
-          return data.market ?? null;
-        }
-      } catch {
-        return null;
-      }
-    }
+    const { getKalshiMarketById } = await import("@/lib/kalshi/service");
+    return getKalshiMarketById(marketId);
   }
 
   return null;

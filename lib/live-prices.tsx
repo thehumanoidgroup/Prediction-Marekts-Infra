@@ -15,8 +15,7 @@ import type { LiveEvent, LiveEventStatus } from "@/lib/types";
 /**
  * Live market prices and events for the whole app.
  *
- * Uses a client-side simulator on Vercel by default. When `NEXT_PUBLIC_WS_URL` is set,
- * connects to the Python backend WebSocket for live Kalshi/internal ticks.
+ * Uses a client-side simulator on Vercel (single-app deployment).
  */
 
 export type FeedStatus = "connecting" | "live" | "simulated";
@@ -284,69 +283,14 @@ export function LivePricesProvider({
   }, []);
 
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_WS_URL;
-    if (!base) {
-      startSimulator();
-      return () => {
-        if (simulatorRef.current) {
-          clearInterval(simulatorRef.current);
-          simulatorRef.current = null;
-        }
-      };
-    }
-
-    let socket: WebSocket | null = null;
-    let closed = false;
-    try {
-      socket = new WebSocket(`${base}/ws/markets/${tenantSlug}`);
-    } catch {
-      startSimulator();
-      return () => {
-        if (simulatorRef.current) {
-          clearInterval(simulatorRef.current);
-          simulatorRef.current = null;
-        }
-      };
-    }
-
-    socket.onopen = () => {
-      if (simulatorRef.current) {
-        clearInterval(simulatorRef.current);
-        simulatorRef.current = null;
-      }
-      setStatus("live");
-      socket?.send(JSON.stringify({ type: "subscribe", rooms: ["all"] }));
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data as string) as Record<string, unknown>;
-        if (message.type === "portfolio_update") {
-          window.dispatchEvent(new CustomEvent("pp:portfolio-refresh"));
-          return;
-        }
-        queueMessage(message);
-      } catch {
-        // Ignore malformed frames.
-      }
-    };
-
-    socket.onerror = () => {
-      if (!closed) startSimulator();
-    };
-    socket.onclose = () => {
-      if (!closed) startSimulator();
-    };
-
+    startSimulator();
     return () => {
-      closed = true;
-      socket?.close();
       if (simulatorRef.current) {
         clearInterval(simulatorRef.current);
         simulatorRef.current = null;
       }
     };
-  }, [tenantSlug, startSimulator, queueMessage]);
+  }, [startSimulator]);
 
   const mergedPrices = useMemo(() => {
     const next = { ...prices };

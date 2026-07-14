@@ -20,8 +20,7 @@ export default async function PlatformIntegrationsPage() {
         <CardBody>
           <p className="text-sm text-muted">
             Monitor third-party integrations used by the trading platform. Polymarket and Kalshi
-            supply live market listings; Kalshi also powers virtual demo evaluation accounts when the
-            Python backend is connected.
+            supply live market listings; Kalshi demo accounts are provisioned in-process via Prisma.
           </p>
         </CardBody>
       </Card>
@@ -58,21 +57,22 @@ export default async function PlatformIntegrationsPage() {
           <CardBody className="space-y-3 text-sm text-muted">
             <ul className="list-inside list-disc space-y-1 text-xs">
               <li>
-                <code>GET /api/kalshi/status</code> (Python backend)
+                <code>GET /api/kalshi/status</code>
               </li>
               <li>
-                <code>GET /api/kalshi/markets</code> (Python backend)
+                <code>GET /api/markets?source=kalshi</code>
               </li>
               <li>
-                <code>POST /api/v1/webhooks/accounts</code> — purchase webhook
+                <code>POST /api/admin/accounts/provision</code> — manual Kalshi issuance
               </li>
               <li>
-                <code>POST /api/v1/admin/accounts/provision</code> — manual issuance
+                <code>POST /api/provisioning/webhook</code> — purchase webhook
               </li>
             </ul>
             <p className="text-xs">
-              See <code>backend/integrations/kalshi/README.md</code> for demo accounts and API keys.
-              Set <code>API_URL</code> to proxy Kalshi routes from this Next.js app.
+              Public Kalshi market data is fetched in-process. Optional{" "}
+              <code>PP_KALSHI_API_KEY</code> / <code>PP_KALSHI_API_SECRET</code> for authenticated
+              endpoints.
             </p>
           </CardBody>
         </Card>

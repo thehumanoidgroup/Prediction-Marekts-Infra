@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { getRequestTenant } from "@/lib/tenant-server";
-import { fetchBackendPortfolio } from "@/lib/api-server";
 import { getAccount, getPortfolioSummary, getPositions } from "@/lib/services";
 import { formatPct, formatSignedUsd, formatUsd, formatUsdPrecise } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -14,10 +13,9 @@ export const metadata: Metadata = { title: "Portfolio" };
 
 export default async function PortfolioPage() {
   const tenant = await getRequestTenant();
-  const remote = await fetchBackendPortfolio(tenant.slug);
-  const account = remote?.account ?? getAccount(tenant.id);
-  const summary = remote?.summary ?? getPortfolioSummary(tenant.id);
-  const positions = remote?.positions ?? getPositions(tenant.id);
+  const account = getAccount(tenant.id);
+  const summary = getPortfolioSummary(tenant.id);
+  const positions = getPositions(tenant.id);
 
   const stats: Stat[] = [
     { label: "Balance", value: formatUsd(summary.balance), sub: "Settled cash" },

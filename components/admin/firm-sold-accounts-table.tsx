@@ -66,7 +66,7 @@ export function FirmSoldAccountsTable({ refreshKey }: { refreshKey?: number }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.id} className="border-b border-edge/60 last:border-0 hover:bg-surface-2/50">
-              <td className="py-3 pr-4 text-muted">{formatDate(row.created_at)}</td>
+              <td className="py-3 pr-4 text-muted">{formatDate(Date.parse(row.created_at))}</td>
               <td className="py-3 pr-4">
                 <div className="font-medium">{row.trader_display_name}</div>
                 <div className="text-xs text-faint">{row.trader_email}</div>

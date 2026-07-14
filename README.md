@@ -25,9 +25,6 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 ├── services/                # Business logic layer
 ├── types/                   # Shared TypeScript types
 ├── prisma/schema.prisma     # Database schema (Vercel deployment)
-├── backend/                 # Optional Python FastAPI service (Kalshi live feed, risk engine)
-│   ├── integrations/kalshi/ # Kalshi Trading API client + demo account docs
-│   └── services/            # Account provisioning, challenge presets
 ├── middleware.ts
 ├── package.json
 └── .env.example
@@ -72,7 +69,7 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/auth/login` | POST | JWT login |
 | `/api/auth/register` | POST | Trader signup |
 | `/api/auth/me` | GET | Current user (Bearer token) |
-| `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket`) |
+| `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket\|kalshi`) |
 | `/api/markets/[id]` | GET | Single market |
 | `/api/orders` | POST | Place order |
 | `/api/portfolio` | GET | Portfolio snapshot |
@@ -80,7 +77,10 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/tenant` | GET | Public tenant config |
 | `/api/polymarket/markets` | GET | Polymarket CLOB listings |
 | `/api/polymarket/search` | GET | Search Polymarket markets |
-| `/api/platform/integrations/polymarket` | GET | Integration health |
+| `/api/platform/integrations/polymarket` | GET | Polymarket integration health |
+| `/api/kalshi/status` | GET | Kalshi integration health |
+| `/api/orders/preview` | POST | Pre-trade risk check |
+| `/api/admin/accounts/provision` | POST | Firm admin Kalshi demo issuance |
 
 ### Account provisioning
 
@@ -95,18 +95,9 @@ Automated prop firm account provisioning: sold evaluations, encrypted credential
 | `/api/provisioning/jobs/[id]` | GET | Super Admin JWT | Async job status |
 | `/api/admin/provisioning-settings` | GET, PATCH | Prop Firm Admin | Default rules per model type |
 
-**Kalshi demo accounts (optional Python backend)** — set `API_URL` to enable:
-
-| Route | Method | Purpose |
-| --- | --- | --- |
-| `/api/kalshi/status` | GET | Kalshi API + cache health |
-| `/api/v1/webhooks/accounts` | POST | Purchase webhook → Kalshi demo account |
-| `/api/v1/admin/accounts/provision` | POST | Manual Kalshi issuance |
-| `/api/v1/trading/orders/preview` | POST | Pre-trade risk check |
-
 **Super Admin UI:** `/platform/provisioning` — manual provisioning, audit log, recent accounts.
 
-**Prop Firm Admin UI:** `/admin/provisioning` — allowed sizes, per-model defaults, override policy.
+**Prop Firm Admin UI:** `/admin/accounts` — issue Kalshi demo accounts; `/admin/provisioning` — firm defaults.
 
 ```bash
 # Example webhook (after npx prisma db push and seed)
@@ -159,34 +150,15 @@ npm test           # Provisioning unit tests (Vitest)
 npx prisma studio  # Browse database
 ```
 
-## Kalshi demo accounts
+## Kalshi integration
 
-Prop firms can issue **Kalshi-linked virtual evaluation accounts** when the optional Python backend is running. Each account gets a simulated bankroll, live Kalshi market prices, and the same risk engine used for internal LMSR markets.
+Kalshi market listings and demo account issuance run **in the same Next.js deployment**:
 
-**Detailed docs:** [`backend/integrations/kalshi/README.md`](backend/integrations/kalshi/README.md)
+- **Markets** — `GET /api/markets?source=kalshi` fetches public Kalshi data via `lib/kalshi/`
+- **Demo accounts** — Firm admins issue from **Admin → Accounts** or `POST /api/admin/accounts/provision` (Prisma + in-process risk engine)
+- **Purchase webhook** — `POST /api/provisioning/webhook` with `custom_rules.provider: "kalshi"` if desired
 
-### How it works
-
-1. **Purchase webhook** — `POST /api/v1/webhooks/accounts` after checkout (`provider="kalshi"` default).
-2. **Provisioning** — creates the trader, links Kalshi tickers, applies challenge rules, logs `SoldAccount`.
-3. **Trader login** — dashboard shows Kalshi markets, virtual bets, and live challenge progress.
-
-Firm admins can also issue from **Admin → Accounts** or `POST /api/v1/admin/accounts/provision`.
-
-Set `API_URL=http://localhost:8000` and `NEXT_PUBLIC_WS_URL=ws://localhost:8000` in `.env.local` to connect the Next.js app to the Python backend locally.
-
-## Development
-
-```bash
-npm run dev        # Start dev server
-npm run build      # Production build
-npm run typecheck  # TypeScript check
-npm test           # Provisioning unit tests (Vitest)
-npx prisma studio  # Browse database
-
-# Optional Kalshi backend (from repo root)
-cd backend && uvicorn app.main:app --reload --port 8000
-```
+Optional env vars: `PP_KALSHI_BASE_URL`, `PP_KALSHI_API_KEY`, `PP_KALSHI_API_SECRET`, `KALSHI_CACHE_TTL_SECONDS`.
 
 ## License
 

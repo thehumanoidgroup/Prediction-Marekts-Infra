@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/backend";
 import { getTenantFromRequest } from "@/lib/tenant-request";
+import { previewOrderRisk } from "@/lib/provisioning/order-preview";
+import type { Outcome } from "@/types";
 
 export async function POST(request: NextRequest) {
   const tenant = getTenantFromRequest(request);
@@ -25,30 +26,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const base = getBackendUrl();
-  if (!base) {
-    return NextResponse.json({ preview: { allowed: true, reasons: [], violations: [], stake: 0, side } });
-  }
+  const preview = await previewOrderRisk({
+    tenantId: tenant.id,
+    marketId,
+    outcome: outcome as Outcome,
+    side,
+    shares,
+    yesPrice: typeof yesPrice === "number" ? yesPrice : 0.5,
+  });
 
-  try {
-    const response = await fetch(`${base}/api/v1/trading/orders/preview`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Tenant-Slug": tenant.slug,
-      },
-      body: JSON.stringify({ marketId, outcome, side, shares, yesPrice }),
-      cache: "no-store",
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: data.detail ?? "Preview failed" },
-        { status: response.status },
-      );
-    }
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json({ error: "Backend unavailable" }, { status: 502 });
-  }
+  return NextResponse.json({ preview });
 }

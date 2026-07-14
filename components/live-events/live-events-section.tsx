@@ -5,7 +5,7 @@ import { Suspense, useState } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { LiveEventCard } from "@/components/live-events/live-event-card";
 import { MarketSourceToggle } from "@/components/markets/market-source-toggle";
-import { useLiveEventsFeed } from "@/lib/hooks/use-live-events";
+import { useLiveEventsFeed } from "@/hooks/use-live-events";
 import type { MarketViewSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 

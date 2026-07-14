@@ -1,34 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/backend";
+import { NextResponse } from "next/server";
 import { getRequestTenant } from "@/lib/tenant-server";
+import { ensureSeeded } from "@/lib/seed";
+import { listPropFirmAccountsByFirm } from "@/lib/provisioning/accounts";
+import { provisioningDbUnavailable } from "@/lib/provisioning/route-auth";
+import { toFirmSoldAccount } from "@/lib/provisioning/kalshi-admin";
+import { prisma } from "@/lib/db";
 
-async function proxy(
-  request: NextRequest,
-  path: string,
-  init?: RequestInit,
-): Promise<NextResponse> {
-  const base = getBackendUrl();
-  if (!base) {
-    return NextResponse.json({ error: "Backend not configured" }, { status: 503 });
-  }
+export async function GET() {
+  if (!process.env.DATABASE_URL) return provisioningDbUnavailable();
 
   const tenant = await getRequestTenant();
-  const headers: Record<string, string> = {
-    "X-Tenant-Slug": tenant.slug,
-    ...(init?.headers as Record<string, string> | undefined),
-  };
+  await ensureSeeded();
 
-  try {
-    const response = await fetch(`${base}${path}`, { ...init, headers });
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
-  } catch {
-    return NextResponse.json({ error: "Backend unavailable" }, { status: 502 });
-  }
-}
+  const accounts = await listPropFirmAccountsByFirm(tenant.id);
+  const users = await prisma.user.findMany({
+    where: { tenantId: tenant.id, email: { in: accounts.map((a) => a.traderEmail) } },
+    select: { email: true, displayName: true },
+  });
+  const names = new Map(users.map((user) => [user.email.toLowerCase(), user.displayName]));
 
-export async function GET(request: NextRequest) {
-  const params = request.nextUrl.searchParams.toString();
-  const suffix = params ? `?${params}` : "";
-  return proxy(request, `/api/v1/admin/accounts/sold${suffix}`);
+  return NextResponse.json(
+    accounts.map((account) => toFirmSoldAccount(account, names.get(account.traderEmail.toLowerCase()))),
+  );
 }
