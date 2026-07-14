@@ -1,5 +1,8 @@
 from functools import lru_cache
+import os
+from typing import Any
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +63,39 @@ class Settings(BaseSettings):
     polymarket_rate_limit_burst: int = 10
     polymarket_max_retries: int = 3
     polymarket_retry_backoff_seconds: float = 0.5
+
+    # Kalshi Trading API (httpx + RSA-PSS auth)
+    kalshi_base_url: str = "https://api.elections.kalshi.com/trade-api/v2"
+    kalshi_demo_base_url: str = "https://demo-api.kalshi.co/trade-api/v2"
+    kalshi_use_demo: bool = False
+    kalshi_api_key: str | None = None
+    kalshi_api_secret: str | None = None
+    kalshi_request_timeout_seconds: float = 30.0
+    kalshi_cache_ttl_seconds: float = 300.0
+    kalshi_list_cache_ttl_seconds: float = 600.0
+    kalshi_price_cache_ttl_seconds: float = 30.0
+    kalshi_max_fetch_pages: int | None = 10
+    kalshi_rate_limit_per_minute: int = 60
+    kalshi_max_retries: int = 3
+    kalshi_retry_backoff_seconds: float = 0.5
+
+    @model_validator(mode="before")
+    @classmethod
+    def _load_unprefixed_kalshi_env(cls, data: Any) -> Any:
+        """Accept ``KALSHI_API_KEY`` / ``KALSHI_API_SECRET`` without the ``PP_`` prefix."""
+        if not isinstance(data, dict):
+            return data
+        if data.get("kalshi_api_key") is None and os.environ.get("KALSHI_API_KEY"):
+            data["kalshi_api_key"] = os.environ["KALSHI_API_KEY"]
+        if data.get("kalshi_api_secret") is None and os.environ.get("KALSHI_API_SECRET"):
+            data["kalshi_api_secret"] = os.environ["KALSHI_API_SECRET"]
+        if data.get("kalshi_use_demo") is None and os.environ.get("KALSHI_USE_DEMO", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            data["kalshi_use_demo"] = True
+        return data
 
 
 @lru_cache
