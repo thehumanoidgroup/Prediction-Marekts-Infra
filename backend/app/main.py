@@ -12,6 +12,7 @@ from app.middleware.tenancy import TenantContextMiddleware
 from app.models import Base
 from app.ws.manager import manager
 from app.ws.ticker import start_ticker, stop_ticker
+from tasks.live_data_ingestion import start_live_data_ingestion, stop_live_data_ingestion
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,7 +31,9 @@ async def lifespan(app: FastAPI):
 
     await manager.startup()
     ticker = start_ticker()
+    ingestion = start_live_data_ingestion()
     yield
+    await stop_live_data_ingestion(ingestion)
     await stop_ticker(ticker)
     await manager.shutdown()
     await engine.dispose()

@@ -19,7 +19,7 @@ from services.live_event_service import LiveEventService, get_live_event_service
 
 router = APIRouter(prefix="/live-events", tags=["live-events"])
 
-LiveEventSourceFilter = Literal["all", "internal", "polymarket"]
+LiveEventSourceFilter = Literal["all", "internal", "polymarket", "external"]
 
 
 def _service(db: Annotated[AsyncSession, Depends(get_db)]) -> LiveEventService:

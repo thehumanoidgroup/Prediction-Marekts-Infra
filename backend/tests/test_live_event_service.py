@@ -93,7 +93,7 @@ def test_live_events_api_list(client):
     body = response.json()
     assert body["count"] >= 1
     assert "counts" in body
-    assert body["events"][0]["source"] in {"internal", "polymarket"}
+    assert body["events"][0]["source"] in {"internal", "polymarket", "external"}
 
 
 def test_live_events_api_source_filter(client):

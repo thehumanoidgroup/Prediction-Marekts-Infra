@@ -1,5 +1,9 @@
 """Shared pytest fixtures for API integration tests."""
 
+import os
+
+os.environ.setdefault("PP_INGESTION_ENABLED", "false")
+
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient

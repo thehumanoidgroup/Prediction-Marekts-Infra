@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Demo market ticker broadcast interval (seconds).
     ticker_interval_seconds: float = 2.0
 
+    # External live data ingestion (sports/politics/crypto polling).
+    ingestion_enabled: bool = True
+    ingestion_interval_seconds: float = 15.0
+    ingestion_providers: list[str] = ["sports", "polymarket"]
+
     # Polymarket CLOB (py-clob-client-v2)
     polymarket_host: str = "https://clob.polymarket.com"
     polymarket_chain_id: int = 137

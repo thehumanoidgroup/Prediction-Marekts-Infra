@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.runtime.serializers import serialize_market
 from app.runtime.store import get_trading_store
 from integrations.polymarket import PolymarketError, get_polymarket_service
 from realtime.event_broadcaster import broadcast_live_event_changes, broadcast_new_event
+from tasks.providers.base import IngestedEventSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,16 @@ def _normalize_probabilities(raw: dict[str, Any] | None) -> dict[str, float]:
     return {"yes": round(yes_f / total, 4), "no": round(no_f / total, 4)}
 
 
+def _source_from_string(value: str) -> LiveEventSource:
+    try:
+        return LiveEventSource(value)
+    except ValueError:
+        return LiveEventSource.INTERNAL
+
+
 def _market_to_event_fields(market: dict[str, Any]) -> dict[str, Any]:
-    source_raw = market.get("source", "internal")
-    source = LiveEventSource.POLYMARKET if source_raw == "polymarket" else LiveEventSource.INTERNAL
+    source_raw = str(market.get("source", "internal"))
+    source = _source_from_string(source_raw)
     status_raw = str(market.get("status", "open"))
     status = _STATUS_MAP.get(status_raw, LiveEventStatus.OPEN)
 
@@ -73,6 +82,13 @@ def _market_to_event_fields(market: dict[str, Any]) -> dict[str, Any]:
         "volume_24h": float(market.get("volume24h") or 0.0),
         "change_24h": float(market.get("change24h") or 0.0),
     }
+
+
+@dataclass
+class IngestResult:
+    event: LiveEvent
+    created: bool
+    changed: bool
 
 
 class LiveEventService:
@@ -183,11 +199,11 @@ class LiveEventService:
     async def _refresh_event_snapshot(self, event: LiveEvent) -> None:
         if event.source == LiveEventSource.INTERNAL:
             await self._refresh_internal_snapshot(event)
-        else:
+        elif event.source == LiveEventSource.POLYMARKET:
             await self._refresh_polymarket_snapshot(event)
 
     def _count_by_source(self, events: list[LiveEvent]) -> dict[str, int]:
-        counts = {"internal": 0, "polymarket": 0}
+        counts = {"internal": 0, "polymarket": 0, "external": 0}
         for event in events:
             key = event.source.value
             if key in counts:
@@ -236,6 +252,102 @@ class LiveEventService:
     async def get_events_by_category(self, category: str, *, sync: bool = True) -> list[LiveEvent]:
         events, _ = await self.get_combined_feed(category=category, sync=sync)
         return events
+
+    async def ingest_snapshot(
+        self,
+        snapshot: IngestedEventSnapshot,
+        *,
+        broadcast: bool = True,
+    ) -> IngestResult:
+        """Upsert a provider snapshot and broadcast when values change."""
+        probabilities = _normalize_probabilities(snapshot.probabilities)
+        status = _STATUS_MAP.get(snapshot.status, LiveEventStatus.OPEN)
+        source = _source_from_string(snapshot.source)
+
+        result = await self.db.execute(
+            select(LiveEvent).where(LiveEvent.external_id == snapshot.external_id)
+        )
+        event = result.scalar_one_or_none()
+
+        if event is None:
+            event = LiveEvent(
+                external_id=snapshot.external_id,
+                source=source,
+                category=snapshot.category,
+                status=status,
+                question=snapshot.question,
+                probabilities=probabilities,
+                volume=snapshot.volume,
+                volume_24h=snapshot.volume_24h,
+                change_24h=snapshot.change_24h,
+            )
+            self.db.add(event)
+            await self.db.commit()
+            await self.db.refresh(event)
+
+            if broadcast:
+                await broadcast_new_event(
+                    event.id,
+                    question=event.question,
+                    category=event.category,
+                    status=event.status.value,
+                    probabilities=dict(event.probabilities or {}),
+                    source=event.source.value,
+                    external_id=event.external_id,
+                    volume=event.volume,
+                    volume_24h=event.volume_24h,
+                )
+
+            return IngestResult(event=event, created=True, changed=True)
+
+        before_probs = dict(event.probabilities or {})
+        before_status = event.status.value
+        before_volume = event.volume
+
+        event.source = source
+        event.category = snapshot.category
+        event.status = status
+        event.question = snapshot.question or event.question
+        event.probabilities = probabilities
+        event.volume = snapshot.volume
+        event.volume_24h = snapshot.volume_24h
+        event.change_24h = snapshot.change_24h
+
+        prob_changed = before_probs != probabilities
+        status_changed = before_status != event.status.value
+        volume_delta = max(0.0, event.volume - before_volume)
+        changed = prob_changed or status_changed or volume_delta > 0
+
+        if prob_changed:
+            self.db.add(
+                EventUpdate(
+                    event_id=event.id,
+                    probabilities_before=before_probs,
+                    probabilities_after=probabilities,
+                    volume_delta=volume_delta,
+                )
+            )
+
+        await self.db.commit()
+        await self.db.refresh(event)
+
+        if broadcast and changed:
+            await broadcast_live_event_changes(
+                event_id=event.id,
+                external_id=event.external_id,
+                category=event.category,
+                source=event.source.value,
+                probabilities=dict(event.probabilities or {}),
+                volume=event.volume,
+                volume_24h=event.volume_24h,
+                change_24h=event.change_24h,
+                status=event.status.value,
+                previous_status=before_status if status_changed else None,
+                previous_probabilities=before_probs if prob_changed else None,
+                volume_delta=volume_delta,
+            )
+
+        return IngestResult(event=event, created=False, changed=changed)
 
     async def update_event_probability(
         self,
