@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from sqlalchemy import select
@@ -12,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
 from app.runtime.serializers import serialize_market
 from app.runtime.store import get_trading_store
-from app.ws.manager import manager
 from integrations.polymarket import PolymarketError, get_polymarket_service
+from realtime.event_broadcaster import broadcast_live_event_changes, broadcast_new_event
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +113,18 @@ class LiveEventService:
                 event = LiveEvent(**fields)
                 self.db.add(event)
                 upserted += 1
+                await self.db.flush()
+                await broadcast_new_event(
+                    event.id,
+                    question=event.question,
+                    category=event.category,
+                    status=event.status.value,
+                    probabilities=dict(event.probabilities or {}),
+                    source=event.source.value,
+                    external_id=event.external_id,
+                    volume=event.volume,
+                    volume_24h=event.volume_24h,
+                )
             else:
                 for key, value in fields.items():
                     setattr(event, key, value)
@@ -192,6 +203,8 @@ class LiveEventService:
             return None
 
         before = dict(event.probabilities or {})
+        before_status = event.status.value
+        before_volume = event.volume
         after = _normalize_probabilities(new_prices)
 
         if event.source == LiveEventSource.INTERNAL:
@@ -219,27 +232,43 @@ class LiveEventService:
         )
         await self.db.commit()
         await self.db.refresh(event)
+
+        await broadcast_live_event_changes(
+            event_id=event.id,
+            external_id=event.external_id,
+            category=event.category,
+            source=event.source.value,
+            probabilities=dict(event.probabilities or {}),
+            volume=event.volume,
+            volume_24h=event.volume_24h,
+            change_24h=event.change_24h,
+            status=event.status.value,
+            previous_status=before_status if before_status != event.status.value else None,
+            previous_probabilities=before if before != event.probabilities else None,
+            volume_delta=volume_delta if volume_delta > 0 else max(0.0, event.volume - before_volume),
+        )
         return event
 
     async def broadcast_event_update(self, event_id: str, update_data: dict[str, Any]) -> None:
-        """Fan out a live event update to every active tenant WebSocket channel."""
-        from sqlalchemy import select as sa_select
-
-        from app.models import Tenant
-
+        """Fan out structured live event updates through the real-time broadcaster."""
         event = await self._resolve_event(event_id)
-        payload = {
-            "type": "live_event_update",
-            "event_id": event.id if event else event_id,
-            "external_id": event.external_id if event else event_id,
-            "ts": int(time.time() * 1000),
-            **update_data,
-        }
+        if event is None:
+            return
 
-        result = await self.db.execute(sa_select(Tenant.slug).where(Tenant.is_active))
-        slugs = [row[0] for row in result]
-        for slug in slugs:
-            await manager.broadcast(slug, payload)
+        await broadcast_live_event_changes(
+            event_id=event.id,
+            external_id=event.external_id,
+            category=event.category,
+            source=event.source.value,
+            probabilities=dict(event.probabilities or {}),
+            volume=float(update_data.get("volume", event.volume)),
+            volume_24h=float(update_data.get("volume_24h", event.volume_24h)),
+            change_24h=float(update_data.get("change_24h", event.change_24h)),
+            status=str(update_data.get("status", event.status.value)),
+            previous_probabilities=update_data.get("previous_probabilities"),
+            previous_status=update_data.get("previous_status"),
+            volume_delta=float(update_data.get("volume_delta", 0.0)),
+        )
 
 
 def get_live_event_service(db: AsyncSession) -> LiveEventService:

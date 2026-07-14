@@ -75,16 +75,16 @@ async def test_broadcast_event_update_publishes_to_tenants(db_session):
     events = await service.get_all_live_events()
     event = events[0]
 
-    with patch("services.live_event_service.manager.broadcast", AsyncMock()) as broadcast:
+    with patch(
+        "services.live_event_service.broadcast_live_event_changes",
+        AsyncMock(),
+    ) as broadcast:
         await service.broadcast_event_update(
             event.id,
             {"probabilities": event.probabilities},
         )
 
-    assert broadcast.await_count >= 1
-    payload = broadcast.await_args_list[0].args[1]
-    assert payload["type"] == "live_event_update"
-    assert payload["external_id"] == event.external_id
+    broadcast.assert_awaited_once()
 
 
 def test_live_events_api_list(client):

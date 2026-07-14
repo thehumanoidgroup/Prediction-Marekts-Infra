@@ -13,10 +13,15 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 CHANNEL_PREFIX = "pp:markets:"
+DEFAULT_ROOM = "all"
 
 
 class ConnectionManager:
-    """Tenant-aware WebSocket fan-out.
+    """Tenant-aware WebSocket fan-out with optional room subscriptions.
+
+    Rooms let clients subscribe to tenant-wide feeds (``all``),
+    category channels (``category:crypto``), or single events
+    (``event:<uuid>`` / ``event:<external_id>``).
 
     Local connections are grouped per tenant. When Redis is reachable,
     messages are published through pub/sub so every API replica delivers
@@ -25,6 +30,7 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         self._connections: dict[str, set[WebSocket]] = defaultdict(set)
+        self._socket_rooms: dict[WebSocket, set[str]] = {}
         self._lock = asyncio.Lock()
         self._redis: aioredis.Redis | None = None
         self._listener_task: asyncio.Task[None] | None = None
@@ -54,26 +60,68 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self._connections[tenant_slug].add(websocket)
+            self._socket_rooms[websocket] = {DEFAULT_ROOM}
 
     async def disconnect(self, tenant_slug: str, websocket: WebSocket) -> None:
         async with self._lock:
             self._connections[tenant_slug].discard(websocket)
+            self._socket_rooms.pop(websocket, None)
 
-    async def broadcast(self, tenant_slug: str, message: dict[str, Any]) -> None:
-        """Publishes to all replicas via Redis, or locally as a fallback."""
+    async def subscribe(self, websocket: WebSocket, rooms: list[str]) -> set[str]:
+        """Add room subscriptions for a connected socket."""
+        normalized = [room for room in rooms if room]
+        async with self._lock:
+            subs = self._socket_rooms.setdefault(websocket, {DEFAULT_ROOM})
+            subs.update(normalized)
+            return set(subs)
+
+    async def unsubscribe(self, websocket: WebSocket, rooms: list[str]) -> set[str]:
+        """Remove room subscriptions; falls back to ``all`` if none remain."""
+        normalized = [room for room in rooms if room]
+        async with self._lock:
+            subs = self._socket_rooms.setdefault(websocket, {DEFAULT_ROOM})
+            subs.difference_update(normalized)
+            if not subs:
+                subs.add(DEFAULT_ROOM)
+            return set(subs)
+
+    def subscriptions(self, websocket: WebSocket) -> set[str]:
+        return set(self._socket_rooms.get(websocket, {DEFAULT_ROOM}))
+
+    async def broadcast(
+        self,
+        tenant_slug: str,
+        message: dict[str, Any],
+        *,
+        rooms: list[str] | None = None,
+    ) -> None:
+        """Publish to tenant subscribers, optionally scoped to specific rooms."""
+        outbound = dict(message)
+        if rooms is not None:
+            outbound["_rooms"] = list(rooms)
+        elif "_rooms" not in outbound:
+            outbound["_rooms"] = [DEFAULT_ROOM]
+
         if self._redis:
             try:
-                await self._redis.publish(CHANNEL_PREFIX + tenant_slug, json.dumps(message))
+                await self._redis.publish(CHANNEL_PREFIX + tenant_slug, json.dumps(outbound))
                 return
             except Exception:  # noqa: BLE001
                 logger.exception("Redis publish failed; delivering locally")
-        await self._deliver_local(tenant_slug, message)
+        await self._deliver_local(tenant_slug, outbound)
 
     async def _deliver_local(self, tenant_slug: str, message: dict[str, Any]) -> None:
+        target_rooms = set(message.get("_rooms", [DEFAULT_ROOM]))
+        client_message = {key: value for key, value in message.items() if key != "_rooms"}
+        payload = json.dumps(client_message)
+
         async with self._lock:
             sockets = list(self._connections[tenant_slug])
-        payload = json.dumps(message)
+
         for socket in sockets:
+            subscribed = self._socket_rooms.get(socket, {DEFAULT_ROOM})
+            if not subscribed & target_rooms:
+                continue
             try:
                 await socket.send_text(payload)
             except Exception:  # noqa: BLE001 - drop dead sockets

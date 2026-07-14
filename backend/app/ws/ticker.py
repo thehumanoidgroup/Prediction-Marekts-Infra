@@ -2,15 +2,10 @@ import asyncio
 import contextlib
 import logging
 import random
-import time
-
-from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Tenant
 from app.models.live_event import LiveEventSource
-from app.ws.manager import manager
 from services.live_event_service import get_live_event_service
 
 logger = logging.getLogger(__name__)
@@ -45,30 +40,6 @@ async def run_market_ticker() -> None:
                 )
                 if updated is None:
                     continue
-
-                tick = {
-                    "type": "price_tick",
-                    "market_id": updated.external_id,
-                    "yes_price": updated.probabilities.get("yes", new_yes),
-                    "ts": int(time.time() * 1000),
-                }
-
-                result = await db.execute(select(Tenant.slug).where(Tenant.is_active))
-                slugs = [row[0] for row in result]
-                for slug in slugs:
-                    await manager.broadcast(slug, tick)
-
-                await service.broadcast_event_update(
-                    updated.id,
-                    {
-                        "probabilities": updated.probabilities,
-                        "volume": updated.volume,
-                        "volume_24h": updated.volume_24h,
-                        "change_24h": updated.change_24h,
-                        "category": updated.category,
-                        "status": updated.status.value,
-                    },
-                )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the ticker must never die

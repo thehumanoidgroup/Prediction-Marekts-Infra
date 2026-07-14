@@ -69,15 +69,6 @@ async def update_probability(
     if event is None:
         raise HTTPException(404, detail="Live event not found")
 
-    await service.broadcast_event_update(
-        event.id,
-        {
-            "probabilities": event.probabilities,
-            "volume": event.volume,
-            "volume_24h": event.volume_24h,
-            "change_24h": event.change_24h,
-        },
-    )
     return LiveEventResponse.model_validate(event)
 
 
