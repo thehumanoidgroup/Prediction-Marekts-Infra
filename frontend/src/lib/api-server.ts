@@ -6,6 +6,7 @@ import type {
   Order,
   Outcome,
   PolymarketIntegrationStatus,
+  KalshiIntegrationStatus,
   PortfolioSummary,
   Position,
 } from "@/lib/types";
@@ -192,6 +193,10 @@ export async function fetchBackendPolymarketMarket(
 
 export async function fetchBackendPolymarketStatus(): Promise<PolymarketIntegrationStatus | null> {
   return backendFetchRoot<PolymarketIntegrationStatus>("/polymarket/status");
+}
+
+export async function fetchBackendKalshiStatus(): Promise<KalshiIntegrationStatus | null> {
+  return backendFetchRoot<KalshiIntegrationStatus>("/kalshi/status");
 }
 
 export async function postBackendOrder(

@@ -123,6 +123,21 @@ export interface PolymarketIntegrationStatus {
   error: string | null;
 }
 
+export interface KalshiIntegrationStatus {
+  provider: "kalshi";
+  enabled: boolean;
+  healthy: boolean;
+  baseUrl: string;
+  authMode: string;
+  hasApiCredentials: boolean;
+  redis: "connected" | "unavailable" | string;
+  api: "connected" | "error" | "unknown" | string;
+  marketSampleSize: number | null;
+  latencyMs: number | null;
+  cachedMarketCount: number | null;
+  error: string | null;
+}
+
 export interface Position {
   id: string;
   marketId: string;

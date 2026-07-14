@@ -38,7 +38,10 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 │       │   ├── deps.py        # tenant resolution, current user, role guards
 │       │   └── routes/        # auth, tenants, trading, polymarket, health, ws
 │       ├── integrations/
-│       │   └── polymarket/    # py-clob-client-v2 wrapper, service, caching
+│       │   ├── polymarket/    # py-clob-client-v2 wrapper, service, caching
+│       │   └── kalshi/        # Trading API client, demo account market data
+│       ├── services/
+│       │   └── account_provisioning.py  # Kalshi demo account issuance
 │       └── ws/
 │           ├── manager.py     # tenant-aware WebSocket fan-out via Redis pub/sub
 │           └── ticker.py      # demo market price broadcaster
@@ -126,6 +129,11 @@ Seeded in development (password for all: `demo-password-123`):
 | `/api/polymarket/markets/{id}` | GET | — | Single Polymarket market |
 | `/api/polymarket/search` | GET | — | Search Polymarket markets (`q` required) |
 | `/api/polymarket/status` | GET | — | Polymarket CLOB + cache health |
+| `/api/kalshi/markets` | GET | — | List Kalshi markets (paginated) |
+| `/api/kalshi/status` | GET | — | Kalshi API + cache health |
+| `/api/v1/webhooks/accounts` | POST | — | Auto-provision evaluation account (purchase webhook) |
+| `/api/v1/admin/accounts/provision` | POST | PropFirmAdmin | Manually issue evaluation account |
+| `/api/v1/trading/orders/preview` | POST | Trader | Pre-trade risk check |
 | `/ws/markets/{tenant_slug}` | WS | — | Real-time price ticks (per-tenant channel) |
 
 ## Real-time pipeline
@@ -214,3 +222,69 @@ curl "http://localhost:8000/api/polymarket/markets/poly-0x..."
 - `/platform/integrations` — Super Admin connection status (SuperAdmin)
 
 Hybrid listings use `GET /api/v1/trading/markets?source=all` (default) and return per-source counts.
+
+## Kalshi demo accounts
+
+Prop firms can issue **Kalshi-linked virtual evaluation accounts** to traders. Each account gets a simulated bankroll, live Kalshi market prices, and the same risk engine used for internal LMSR markets (max bet size, drawdown, profit target, daily loss, etc.).
+
+**Detailed docs:** [`backend/integrations/kalshi/README.md`](backend/integrations/kalshi/README.md)
+
+### How it works
+
+1. **Purchase webhook** — your prop firm website calls `POST /api/v1/webhooks/accounts` after checkout (optional `provider="kalshi"`, defaults to Kalshi).
+2. **Provisioning** — the platform creates or updates the trader, links live Kalshi market tickers, applies challenge rules, and logs a `SoldAccount` audit row.
+3. **Trader login** — the trader sees live Kalshi markets on the dashboard, places virtual bets at current prices, and challenge progress updates in real time.
+
+Firm admins can also issue accounts manually from **Admin → Accounts** (`POST /api/v1/admin/accounts/provision`) with full challenge rule overrides.
+
+### Webhook example
+
+```bash
+curl -X POST http://localhost:8000/api/v1/webhooks/accounts \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Slug: apex" \
+  -H "X-Webhook-Secret: your-webhook-secret" \
+  -d '{
+    "email": "trader@example.com",
+    "provider": "kalshi",
+    "account_size": 25000,
+    "model_type": "1step",
+    "external_order_id": "order-12345",
+    "challenge_rules": { "profit_target_pct": 10, "max_daily_loss_pct": 5 }
+  }'
+```
+
+Response includes `account_id`, `provider`, `kalshi_live_integration_enabled`, and `kalshi_market_tickers`.
+
+### Manual issuance (Prop Firm Admin)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/accounts/provision \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Slug: apex" \
+  -d '{
+    "email": "trader@example.com",
+    "provider": "kalshi",
+    "account_size": 50000,
+    "model_type": "2step",
+    "send_credentials_email": true
+  }'
+```
+
+### Trader experience
+
+- Dashboard shows a **Kalshi** badge and a **Kalshi Markets** section when `provider=kalshi`
+- Virtual bets use live Kalshi prices; P&amp;L and equity curve update on each portfolio refresh
+- Pre-trade warnings appear when an order would breach stake or exposure limits
+- Challenge progress panel tracks profit target, drawdown, daily loss, and min trading days
+
+### Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `PP_KALSHI_API_KEY` | Optional — Kalshi API key ID for authenticated endpoints |
+| `PP_KALSHI_API_SECRET` | Optional — RSA private key PEM or file path |
+| `PP_WEBHOOK_SECRET` | Optional — validates `X-Webhook-Secret` on purchase webhooks |
+| `PP_REDIS_URL` | Recommended — caches Kalshi market listings and live prices |
+
+Public market data works without API keys. Verify connectivity at `GET /api/kalshi/status` or **Platform → Integrations** in the Super Admin UI.

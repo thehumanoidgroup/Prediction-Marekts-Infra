@@ -1,16 +1,19 @@
 import Link from "next/link";
-import type { PortfolioSummary } from "@/lib/types";
+import type { ChallengeAccount, PortfolioSummary } from "@/lib/types";
 import { formatSignedUsd, formatUsd } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ProviderBadge } from "@/components/ui/provider-badge";
 import { cn } from "@/lib/utils";
 
 /** Compact portfolio rail card for the dashboard side column. */
 export function PortfolioCard({
   summary,
   openPositions,
+  account,
 }: {
   summary: PortfolioSummary;
   openPositions: number;
+  account?: Pick<ChallengeAccount, "provider" | "label">;
 }) {
   const rows: Array<{ label: string; value: string; tone?: "up" | "down" }> = [
     { label: "Cash balance", value: formatUsd(summary.balance) },
@@ -33,12 +36,15 @@ export function PortfolioCard({
       <CardHeader
         title="Portfolio"
         action={
-          <Link
-            href="/portfolio"
-            className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
-          >
-            Details
-          </Link>
+          <div className="flex items-center gap-2">
+            <ProviderBadge provider={account?.provider} compact />
+            <Link
+              href="/portfolio"
+              className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
+            >
+              Details
+            </Link>
+          </div>
         }
       />
       <CardBody>

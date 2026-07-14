@@ -242,3 +242,108 @@ pytest tests/test_kalshi_client.py tests/test_kalshi_service.py tests/test_kalsh
 ```
 
 Tests mock httpx and Redis — no live API keys required.
+
+## Kalshi demo accounts
+
+Virtual evaluation accounts that trade against **live Kalshi prices** with a simulated bankroll. The same `RiskEngine` enforces challenge rules as for internal LMSR markets.
+
+### Issuance paths
+
+| Path | Endpoint | Who calls it |
+| --- | --- | --- |
+| Purchase webhook | `POST /api/v1/webhooks/accounts` | Prop firm website after checkout |
+| Manual issuance | `POST /api/v1/admin/accounts/provision` | Prop Firm Admin dashboard or API |
+
+Both accept `provider="kalshi"` (webhook default), `model_type`, `challenge_rules`, and `template_config_id`.
+
+### Webhook flow (new purchase)
+
+```
+Prop firm checkout
+       │
+       ▼
+POST /api/v1/webhooks/accounts  (X-Tenant-Slug + optional X-Webhook-Secret)
+       │
+       ▼
+provision_new_account()
+  ├── fetch_kalshi_live_markets()  → link tickers
+  ├── create/update TraderDemoAccount (provider=kalshi)
+  ├── reset in-memory trading session
+  ├── send credentials email
+  └── log SoldAccount audit row
+       │
+       ▼
+Trader logs in → dashboard shows Kalshi Markets + challenge progress
+```
+
+Example payload:
+
+```json
+{
+  "email": "trader@example.com",
+  "provider": "kalshi",
+  "account_size": 25000,
+  "model_type": "1step",
+  "external_order_id": "stripe_pi_abc123",
+  "challenge_rules": {
+    "profit_target_pct": 10,
+    "max_daily_loss_pct": 5,
+    "max_stake_per_order": 2500
+  }
+}
+```
+
+### Manual issuance (prop firm owner)
+
+Use the **Admin → Accounts** UI or call the admin API directly. Supports the same challenge rule fields plus `template_config_id` to copy from an existing config.
+
+### Trader runtime
+
+Once provisioned:
+
+- `TraderDemoAccount.provider` is `kalshi`
+- `kalshi_market_tickers` allowlists which markets appear in listings and accept orders
+- `GET /api/v1/trading/portfolio` refreshes Kalshi quotes and re-runs drawdown checks
+- `POST /api/v1/trading/orders` with `marketId` like `kalshi-KXBTC-25DEC31` places virtual fills at the live price
+- `POST /api/v1/trading/orders/preview` returns pre-trade risk warnings
+
+### Related modules
+
+| Module | Role |
+| --- | --- |
+| `services/account_provisioning.py` | `provision_new_account()`, Kalshi ticker fetch, SoldAccount logging |
+| `services/challenge_presets.py` | 1-step / 2-step / 3-step / instant rule presets |
+| `app/api/routes/account_provisioning.py` | Webhook + admin REST endpoints |
+| `app/runtime/store.py` | `place_external_order()`, shared risk engine |
+| `app/engine/risk.py` | Stake limits, drawdown, profit target enforcement |
+| `tasks/providers/kalshi_polling.py` | Background live price ingestion |
+
+### Environment for provisioning
+
+```bash
+PP_WEBHOOK_SECRET=your-shared-secret   # optional, validates purchase webhooks
+PP_KALSHI_API_KEY=...                  # optional for public market data
+PP_KALSHI_API_SECRET=...               # RSA private key for authenticated API
+```
+
+### Verify end-to-end
+
+```bash
+# 1. Provision via webhook
+curl -X POST http://localhost:8000/api/v1/webhooks/accounts \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Slug: apex" \
+  -d '{"email":"e2e@example.com","account_size":10000}'
+
+# 2. Check Kalshi integration health
+curl http://localhost:8000/api/kalshi/status
+
+# 3. Trader portfolio (use demo trader session or login as provisioned user)
+curl http://localhost:8000/api/v1/trading/portfolio -H "X-Tenant-Slug: apex"
+```
+
+Run automated flow tests:
+
+```bash
+pytest tests/test_kalshi_provisioning_flow.py tests/test_account_provisioning_api.py -q
+```

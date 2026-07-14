@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { getRequestTenant } from "@/lib/tenant-server";
+import { fetchBackendPortfolio } from "@/lib/api-server";
 import { getAccount, getPortfolioSummary, getPositions } from "@/lib/services";
 import { formatPct, formatSignedUsd, formatUsd, formatUsdPrecise } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ProviderBadge } from "@/components/ui/provider-badge";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { PositionsTable } from "@/components/dashboard/positions-table";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
@@ -12,9 +14,10 @@ export const metadata: Metadata = { title: "Portfolio" };
 
 export default async function PortfolioPage() {
   const tenant = await getRequestTenant();
-  const account = getAccount(tenant.id);
-  const summary = getPortfolioSummary(tenant.id);
-  const positions = getPositions(tenant.id);
+  const remote = await fetchBackendPortfolio(tenant.slug);
+  const account = remote?.account ?? getAccount(tenant.id);
+  const summary = remote?.summary ?? getPortfolioSummary(tenant.id);
+  const positions = remote?.positions ?? getPositions(tenant.id);
 
   const stats: Stat[] = [
     { label: "Balance", value: formatUsd(summary.balance), sub: "Settled cash" },
@@ -50,7 +53,10 @@ export default async function PortfolioPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Portfolio</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">Portfolio</h1>
+          <ProviderBadge provider={account.provider} />
+        </div>
         <p className="mt-0.5 text-sm text-muted">
           {account.label} · started {new Date(account.startedAt).toLocaleDateString()}
         </p>

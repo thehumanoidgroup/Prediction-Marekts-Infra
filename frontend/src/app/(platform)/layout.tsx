@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fetchBackendLiveEvents } from "@/lib/api-server";
+import { fetchBackendLiveEvents, fetchBackendPortfolio } from "@/lib/api-server";
 import { initialPricesFromEvents, listFallbackLiveEvents } from "@/lib/live-events";
 import { LivePricesProvider } from "@/lib/live-prices";
 import { getRequestTenant } from "@/lib/tenant-server";
@@ -8,7 +8,8 @@ import { AppShell } from "@/components/layout/app-shell";
 
 export default async function PlatformLayout({ children }: { children: ReactNode }) {
   const tenant = await getRequestTenant();
-  const account = getAccount(tenant.id);
+  const remotePortfolio = await fetchBackendPortfolio(tenant.slug);
+  const account = remotePortfolio?.account ?? getAccount(tenant.id);
 
   const remote = await fetchBackendLiveEvents(tenant.slug);
   const liveEventsPayload = remote ?? listFallbackLiveEvents();
