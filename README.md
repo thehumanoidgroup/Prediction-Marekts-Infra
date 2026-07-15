@@ -18,18 +18,15 @@ A professional, white-label **prediction markets platform for prop firms**. Each
 
 ```
 .
-├── app/
-│   ├── (platform)/          # Dashboard, markets, admin, platform pages
-│   └── api/                 # All backend endpoints (Route Handlers)
+├── app/                     # Next.js App Router pages and API route handlers
 ├── components/              # UI, dashboard, markets, admin, platform
 ├── hooks/                   # Client data hooks
-├── lib/                     # Store, auth, db, polymarket, tenants
+├── lib/                     # Store, auth, db, polymarket, kalshi, tenants
 ├── services/                # Business logic layer
 ├── types/                   # Shared TypeScript types
-├── prisma/schema.prisma     # Database schema
-├── middleware.ts            # Tenant resolution (query → subdomain → cookie)
+├── prisma/schema.prisma     # Database schema (Vercel deployment)
+├── middleware.ts
 ├── package.json
-├── next.config.ts
 └── .env.example
 ```
 
@@ -72,7 +69,7 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/auth/login` | POST | JWT login |
 | `/api/auth/register` | POST | Trader signup |
 | `/api/auth/me` | GET | Current user (Bearer token) |
-| `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket`) |
+| `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket\|kalshi`) |
 | `/api/markets/[id]` | GET | Single market |
 | `/api/orders` | POST | Place order |
 | `/api/portfolio` | GET | Portfolio snapshot |
@@ -80,7 +77,10 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/tenant` | GET | Public tenant config |
 | `/api/polymarket/markets` | GET | Polymarket CLOB listings |
 | `/api/polymarket/search` | GET | Search Polymarket markets |
-| `/api/platform/integrations/polymarket` | GET | Integration health |
+| `/api/platform/integrations/polymarket` | GET | Polymarket integration health |
+| `/api/kalshi/status` | GET | Kalshi integration health |
+| `/api/orders/preview` | POST | Pre-trade risk check |
+| `/api/admin/accounts/provision` | POST | Firm admin Kalshi demo issuance |
 
 ### Account provisioning
 
@@ -97,7 +97,7 @@ Automated prop firm account provisioning: sold evaluations, encrypted credential
 
 **Super Admin UI:** `/platform/provisioning` — manual provisioning, audit log, recent accounts.
 
-**Prop Firm Admin UI:** `/admin/provisioning` — allowed sizes, per-model defaults, override policy.
+**Prop Firm Admin UI:** `/admin/accounts` — issue Kalshi demo accounts; `/admin/provisioning` — firm defaults.
 
 ```bash
 # Example webhook (after npx prisma db push and seed)
@@ -149,6 +149,16 @@ npm run typecheck  # TypeScript check
 npm test           # Provisioning unit tests (Vitest)
 npx prisma studio  # Browse database
 ```
+
+## Kalshi integration
+
+Kalshi market listings and demo account issuance run **in the same Next.js deployment**:
+
+- **Markets** — `GET /api/markets?source=kalshi` fetches public Kalshi data via `lib/kalshi/`
+- **Demo accounts** — Firm admins issue from **Admin → Accounts** or `POST /api/admin/accounts/provision` (Prisma + in-process risk engine)
+- **Purchase webhook** — `POST /api/provisioning/webhook` with `custom_rules.provider: "kalshi"` if desired
+
+Optional env vars: `PP_KALSHI_BASE_URL`, `PP_KALSHI_API_KEY`, `PP_KALSHI_API_SECRET`, `KALSHI_CACHE_TTL_SECONDS`.
 
 ## License
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Market } from "@/lib/types";
 import { formatCompactUsd, formatTimeUntil } from "@/lib/format";
+import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { IconClock, IconUsers } from "@/components/ui/icons";
@@ -17,6 +18,8 @@ const categoryLabels: Record<Market["category"], string> = {
   commodities: "Commodities",
   economics: "Economics",
   indices: "Indices",
+  sports: "Sports",
+  politics: "Politics",
 };
 
 const categoryAccent: Record<Market["category"], string> = {
@@ -26,6 +29,8 @@ const categoryAccent: Record<Market["category"], string> = {
   commodities: "border-l-[#f97316]",
   economics: "border-l-[#22c55e]",
   indices: "border-l-[#ec4899]",
+  sports: "border-l-[#38bdf8]",
+  politics: "border-l-[#a78bfa]",
 };
 
 export function MarketCard({ market }: { market: Market }) {
@@ -43,9 +48,7 @@ export function MarketCard({ market }: { market: Market }) {
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge>{categoryLabels[market.category]}</Badge>
-            {market.source === "internal" ? (
-              <Badge className="bg-accent-soft text-accent">LMSR</Badge>
-            ) : null}
+            <MarketSourceBadge source={market.source} compact />
           </div>
           <div className="flex items-center gap-1.5">
             {market.status === "closing_soon" ? <Badge tone="warn">Closing soon</Badge> : null}

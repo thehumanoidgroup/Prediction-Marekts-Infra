@@ -11,11 +11,13 @@ import {
   formatUsd,
 } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { ProviderBadge } from "@/components/ui/provider-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { ChallengePanel } from "@/components/dashboard/challenge-panel";
-import { DashboardMarketsSection } from "@/components/dashboard/dashboard-markets-section";
+import { LiveEventsSection } from "@/components/live-events/live-events-section";
+import { KalshiMarketsSection } from "@/components/dashboard/kalshi-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { LivePositionsTable } from "@/components/dashboard/live-positions";
@@ -104,6 +106,7 @@ export function DashboardClient({
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+            <ProviderBadge provider={account.provider} />
             <span className="hidden sm:inline-flex">
               <FeedStatusDot />
             </span>
@@ -132,7 +135,7 @@ export function DashboardClient({
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="order-1 flex min-w-0 flex-col gap-4 xl:order-2">
           <ChallengePanel account={account} />
-          <PortfolioCard summary={summary} openPositions={positions.length} />
+          <PortfolioCard summary={summary} openPositions={positions.length} account={account} />
           <Card>
             <CardHeader
               title="Top movers"
@@ -198,7 +201,9 @@ export function DashboardClient({
 
           <JournalCard entries={journalEntries} />
 
-          <DashboardMarketsSection />
+          {account.provider === "kalshi" ? <KalshiMarketsSection /> : null}
+
+          <LiveEventsSection />
         </div>
       </div>
     </div>

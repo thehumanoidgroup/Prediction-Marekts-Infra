@@ -5,42 +5,237 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import type { LiveEvent, LiveEventStatus } from "@/lib/types";
 
 /**
- * Live market prices for the whole app.
+ * Live market prices and events for the whole app.
  *
- * Uses a client-side random-walk simulator so prices feel real-time on Vercel
- * without a separate WebSocket server. Server components render initial prices;
- * hydration is safe because client state starts from the same `initialPrices`.
+ * Uses a client-side simulator on Vercel (single-app deployment).
  */
 
 export type FeedStatus = "connecting" | "live" | "simulated";
 
+interface OptimisticEntry {
+  yes: number;
+  expiresAt: number;
+}
+
 interface LivePricesContextValue {
   prices: Record<string, number>;
+  events: LiveEvent[];
   status: FeedStatus;
+  mergeEvents: (events: LiveEvent[]) => void;
+  optimisticUpdatePrice: (marketId: string, yes: number) => void;
 }
 
 const LivePricesContext = createContext<LivePricesContextValue | null>(null);
 
 const SIMULATOR_INTERVAL_MS = 1_800;
+const OPTIMISTIC_TTL_MS = 2_500;
 const clamp = (p: number) => Math.min(0.97, Math.max(0.03, p));
+
+function applyPriceToEvents(events: LiveEvent[], externalId: string, yes: number): LiveEvent[] {
+  return events.map((event) =>
+    event.externalId === externalId
+      ? {
+          ...event,
+          yesPrice: yes,
+          probabilities: { yes, no: clamp(1 - yes) },
+        }
+      : event,
+  );
+}
+
+function upsertEvent(events: LiveEvent[], incoming: LiveEvent): LiveEvent[] {
+  const index = events.findIndex(
+    (event) => event.id === incoming.id || event.externalId === incoming.externalId,
+  );
+  if (index === -1) return [incoming, ...events];
+  const next = [...events];
+  next[index] = { ...next[index], ...incoming };
+  return next;
+}
+
+function applyLiveMessage(
+  message: Record<string, unknown>,
+  setPrices: React.Dispatch<React.SetStateAction<Record<string, number>>>,
+  setEvents: React.Dispatch<React.SetStateAction<LiveEvent[]>>,
+  clearOptimistic: (marketId: string) => void,
+) {
+  if (message.type === "batch_update" && Array.isArray(message.updates)) {
+    for (const update of message.updates as Record<string, unknown>[]) {
+      applyLiveMessage(update, setPrices, setEvents, clearOptimistic);
+    }
+    return;
+  }
+
+  if (message.type === "price_tick" && typeof message.market_id === "string") {
+    const marketId = message.market_id;
+    const yes = clamp(Number(message.yes_price));
+    clearOptimistic(marketId);
+    setPrices((current) =>
+      marketId in current ? { ...current, [marketId]: yes } : current,
+    );
+    setEvents((current) => applyPriceToEvents(current, marketId, yes));
+    return;
+  }
+
+  if (message.type === "price_update" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const externalId = data.external_id as string | undefined;
+    const probabilities = data.probabilities as { yes?: number } | undefined;
+    const yes = clamp(Number(probabilities?.yes ?? 0.5));
+    const key = externalId ?? String(message.event_id);
+    clearOptimistic(key);
+    setPrices((current) => ({ ...current, [key]: yes }));
+    setEvents((current) =>
+      applyPriceToEvents(current, key, yes).map((item) =>
+        item.externalId === key || item.id === message.event_id
+          ? {
+              ...item,
+              yesPrice: yes,
+              probabilities: { yes, no: clamp(1 - yes) },
+              change24h: Number(data.change_24h ?? item.change24h),
+              source: (data.source as LiveEvent["source"]) ?? item.source,
+            }
+          : item,
+      ),
+    );
+    return;
+  }
+
+  if (message.type === "status_change" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const statusValue = data.status as LiveEventStatus;
+    setEvents((current) =>
+      current.map((item) =>
+        item.id === message.event_id || item.externalId === data.external_id
+          ? { ...item, status: statusValue }
+          : item,
+      ),
+    );
+    return;
+  }
+
+  if (message.type === "new_event" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const externalId = String(data.external_id ?? message.event_id);
+    const yes = clamp(Number((data.probabilities as { yes?: number } | undefined)?.yes ?? 0.5));
+
+    if (data.question) {
+      const incoming: LiveEvent = {
+        id: String(message.event_id),
+        externalId,
+        source: (data.source as LiveEvent["source"]) ?? "internal",
+        category: (data.category as LiveEvent["category"]) ?? "economics",
+        status: (data.status as LiveEventStatus) ?? "open",
+        question: String(data.question),
+        probabilities: { yes, no: clamp(1 - yes) },
+        yesPrice: yes,
+        volume: Number(data.volume ?? 0),
+        volume24h: Number(data.volume_24h ?? 0),
+        change24h: Number(data.change_24h ?? 0),
+        lastUpdated: new Date().toISOString(),
+      };
+      clearOptimistic(externalId);
+      setEvents((current) => upsertEvent(current, incoming));
+      setPrices((current) => ({ ...current, [externalId]: yes }));
+      return;
+    }
+
+    setEvents((current) =>
+      current.map((item) =>
+        item.id === message.event_id || item.externalId === externalId
+          ? {
+              ...item,
+              volume: Number(data.volume ?? item.volume),
+              volume24h: Number(data.volume_24h ?? item.volume24h),
+            }
+          : item,
+      ),
+    );
+  }
+}
 
 export function LivePricesProvider({
   initialPrices,
+  initialEvents = [],
+  tenantSlug = "app",
   children,
 }: {
   initialPrices: Record<string, number>;
+  initialEvents?: LiveEvent[];
   tenantSlug?: string;
   children: ReactNode;
 }) {
   const [prices, setPrices] = useState(initialPrices);
+  const [events, setEvents] = useState<LiveEvent[]>(initialEvents);
   const [status, setStatus] = useState<FeedStatus>("connecting");
+  const [optimistic, setOptimistic] = useState<Record<string, OptimisticEntry>>({});
   const simulatorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingMessages = useRef<Record<string, unknown>[]>([]);
+  const flushScheduled = useRef(false);
+
+  const clearOptimistic = useCallback((marketId: string) => {
+    setOptimistic((current) => {
+      if (!(marketId in current)) return current;
+      const next = { ...current };
+      delete next[marketId];
+      return next;
+    });
+  }, []);
+
+  const flushPending = useCallback(() => {
+    flushScheduled.current = false;
+    const batch = pendingMessages.current.splice(0);
+    if (batch.length === 0) return;
+
+    for (const message of batch) {
+      applyLiveMessage(message, setPrices, setEvents, clearOptimistic);
+    }
+  }, [clearOptimistic]);
+
+  const queueMessage = useCallback(
+    (message: Record<string, unknown>) => {
+      pendingMessages.current.push(message);
+      if (flushScheduled.current) return;
+      flushScheduled.current = true;
+      requestAnimationFrame(flushPending);
+    },
+    [flushPending],
+  );
+
+  const mergeEvents = useCallback((incoming: LiveEvent[]) => {
+    setEvents((current) => {
+      let next = [...current];
+      for (const event of incoming) {
+        next = upsertEvent(next, event);
+      }
+      return next;
+    });
+    setPrices((current) => {
+      const next = { ...current };
+      for (const event of incoming) {
+        next[event.externalId] = event.yesPrice;
+      }
+      return next;
+    });
+  }, []);
+
+  const optimisticUpdatePrice = useCallback((marketId: string, yes: number) => {
+    const normalized = clamp(yes);
+    setOptimistic((current) => ({
+      ...current,
+      [marketId]: { yes: normalized, expiresAt: Date.now() + OPTIMISTIC_TTL_MS },
+    }));
+    setPrices((current) => ({ ...current, [marketId]: normalized }));
+    setEvents((current) => applyPriceToEvents(current, marketId, normalized));
+  }, []);
 
   const startSimulator = useCallback(() => {
     if (simulatorRef.current) return;
@@ -57,7 +252,34 @@ export function LivePricesProvider({
         }
         return next;
       });
+      setEvents((current) =>
+        current.map((event) => {
+          const drift = (Math.random() - 0.5) * 0.02;
+          const yes = clamp(event.yesPrice + drift);
+          return {
+            ...event,
+            yesPrice: yes,
+            probabilities: { yes, no: clamp(1 - yes) },
+          };
+        }),
+      );
     }, SIMULATOR_INTERVAL_MS);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setOptimistic((current) => {
+        const stale = Object.entries(current).filter(([, entry]) => entry.expiresAt <= now);
+        if (stale.length === 0) return current;
+        const next = { ...current };
+        for (const [marketId] of stale) {
+          delete next[marketId];
+        }
+        return next;
+      });
+    }, 500);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -70,9 +292,29 @@ export function LivePricesProvider({
     };
   }, [startSimulator]);
 
-  return (
-    <LivePricesContext.Provider value={{ prices, status }}>{children}</LivePricesContext.Provider>
+  const mergedPrices = useMemo(() => {
+    const next = { ...prices };
+    const now = Date.now();
+    for (const [marketId, entry] of Object.entries(optimistic)) {
+      if (entry.expiresAt > now) {
+        next[marketId] = entry.yes;
+      }
+    }
+    return next;
+  }, [optimistic, prices]);
+
+  const value = useMemo(
+    () => ({
+      prices: mergedPrices,
+      events,
+      status,
+      mergeEvents,
+      optimisticUpdatePrice,
+    }),
+    [mergedPrices, events, status, mergeEvents, optimisticUpdatePrice],
   );
+
+  return <LivePricesContext.Provider value={value}>{children}</LivePricesContext.Provider>;
 }
 
 export function useFeedStatus(): FeedStatus {
@@ -83,4 +325,21 @@ export function useFeedStatus(): FeedStatus {
 export function useLivePrice(marketId: string, fallback: number): number {
   const context = useContext(LivePricesContext);
   return context?.prices[marketId] ?? fallback;
+}
+
+export function useLiveEvents(): LiveEvent[] {
+  return useContext(LivePricesContext)?.events ?? [];
+}
+
+export function useOptimisticPriceUpdate() {
+  const context = useContext(LivePricesContext);
+  return context?.optimisticUpdatePrice ?? (() => undefined);
+}
+
+export function useLiveEventsContext() {
+  const context = useContext(LivePricesContext);
+  if (!context) {
+    throw new Error("useLiveEventsContext must be used within LivePricesProvider");
+  }
+  return context;
 }

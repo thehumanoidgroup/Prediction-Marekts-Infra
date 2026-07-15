@@ -30,7 +30,7 @@ export async function listHybridMarkets(
 ): Promise<{
   markets: Market[];
   source: MarketViewSource;
-  counts: { internal: number; polymarket: number };
+  counts: { internal: number; polymarket: number; kalshi: number };
 }> {
   const source = filters.source ?? "all";
   const { category = "all", query = "", sort = "volume", refresh = false } = filters;
@@ -57,6 +57,15 @@ export async function listHybridMarkets(
     markets.push(...(await poly));
   }
 
+  if (source === "kalshi") {
+    const { searchKalshiMarkets, getActiveKalshiMarkets } = await import("@/lib/kalshi/service");
+    const kalshi =
+      query.trim() && source === "kalshi"
+        ? await searchKalshiMarkets(query, refresh)
+        : await getActiveKalshiMarkets(refresh);
+    markets.push(...kalshi);
+  }
+
   if (source === "all") {
     if (category !== "all") {
       markets = markets.filter((market) => market.category === category);
@@ -66,7 +75,7 @@ export async function listHybridMarkets(
       markets = markets.filter((market) => market.question.toLowerCase().includes(needle));
     }
     markets = sortMarkets(markets, sort);
-  } else if (source === "polymarket") {
+  } else if (source === "polymarket" || source === "kalshi") {
     if (category !== "all") {
       markets = markets.filter((market) => market.category === category);
     }
@@ -76,6 +85,7 @@ export async function listHybridMarkets(
   const counts = {
     internal: markets.filter((market) => market.source === "internal").length,
     polymarket: markets.filter((market) => market.source === "polymarket").length,
+    kalshi: markets.filter((market) => market.source === "kalshi").length,
   };
 
   return { markets, source, counts };
@@ -87,6 +97,11 @@ export async function getHybridMarket(marketId: string): Promise<Market | null> 
 
   if (marketId.startsWith("poly-") || marketId.startsWith("0x")) {
     return getPolymarketMarketById(marketId);
+  }
+
+  if (marketId.toLowerCase().startsWith("kalshi-")) {
+    const { getKalshiMarketById } = await import("@/lib/kalshi/service");
+    return getKalshiMarketById(marketId);
   }
 
   return null;

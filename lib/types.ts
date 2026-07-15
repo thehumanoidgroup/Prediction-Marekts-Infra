@@ -6,12 +6,14 @@ export type MarketCategory =
   | "forex"
   | "commodities"
   | "economics"
-  | "indices";
+  | "indices"
+  | "sports"
+  | "politics";
 
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
 /** Where a market's liquidity and pricing originate. */
-export type MarketSourceType = "internal" | "polymarket";
+export type MarketSourceType = "internal" | "polymarket" | "kalshi" | "external";
 
 /** Trader UI filter for which market feeds to display. */
 export type MarketViewSource = MarketSourceType | "all";
@@ -65,10 +67,41 @@ export type PolymarketMarket = Market & {
   externalConditionId: string;
 };
 
+export type KalshiMarket = Market & {
+  source: "kalshi";
+  externalTicker: string;
+};
+
+export type LiveEventSource = MarketSourceType;
+export type LiveEventStatus = MarketStatus;
+
+/** Unified live event from internal LMSR or Polymarket feeds. */
+export interface LiveEvent {
+  id: string;
+  externalId: string;
+  source: LiveEventSource;
+  category: MarketCategory;
+  status: LiveEventStatus;
+  question: string;
+  probabilities: { yes: number; no: number };
+  yesPrice: number;
+  volume: number;
+  volume24h: number;
+  change24h: number;
+  lastUpdated: string;
+}
+
+export interface LiveEventsPayload {
+  events: LiveEvent[];
+  count: number;
+  counts: { internal: number; polymarket: number; kalshi: number };
+  source: MarketViewSource;
+}
+
 export interface HybridMarketsPayload {
   markets: Market[];
   source: MarketViewSource;
-  counts: { internal: number; polymarket: number };
+  counts: { internal: number; polymarket: number; kalshi: number };
 }
 
 export interface PolymarketIntegrationStatus {
@@ -84,6 +117,21 @@ export interface PolymarketIntegrationStatus {
   canTrade: boolean;
   redis: "connected" | "unavailable" | string;
   clob: "connected" | "error" | "unknown" | string;
+  marketSampleSize: number | null;
+  latencyMs: number | null;
+  cachedMarketCount: number | null;
+  error: string | null;
+}
+
+export interface KalshiIntegrationStatus {
+  provider: "kalshi";
+  enabled: boolean;
+  healthy: boolean;
+  baseUrl: string;
+  authMode: string;
+  hasApiCredentials: boolean;
+  redis: "connected" | "unavailable" | string;
+  api: "connected" | "error" | "unknown" | string;
   marketSampleSize: number | null;
   latencyMs: number | null;
   cachedMarketCount: number | null;
@@ -126,10 +174,33 @@ export interface ChallengeObjective {
   met: boolean;
 }
 
+export interface AccountRiskLimits {
+  maxStakePerOrder: number | null;
+  maxExposurePerMarket: number | null;
+  maxTotalExposure: number | null;
+}
+
+export interface OrderRiskPreview {
+  allowed: boolean;
+  reasons: string[];
+  violations: string[];
+  stake: number;
+  side: "buy" | "sell";
+  projectedMarketExposure?: number;
+  projectedTotalExposure?: number;
+  maxStakePerOrder?: number | null;
+  maxExposurePerMarket?: number | null;
+  maxTotalExposure?: number | null;
+  challengeStatus?: string;
+}
+
 export interface ChallengeAccount {
   id: string;
   label: string;
   phase: ChallengePhase;
+  challengeStatus?: "active" | "passed" | "failed";
+  provider?: "internal" | "polymarket" | "kalshi";
+  kalshiMarketTickers?: string[];
   startingBalance: number;
   balance: number;
   equity: number;
@@ -138,10 +209,14 @@ export interface ChallengeAccount {
   totalPnl: number;
   maxDailyLossPct: number;
   maxDrawdownPct: number;
+  drawdownMode?: "static" | "trailing" | "absolute";
+  drawdownFloor?: number;
+  highWaterMark?: number;
   profitTargetPct: number;
   daysTraded: number;
   minTradingDays: number;
   startedAt: number;
+  riskLimits?: AccountRiskLimits;
   objectives: ChallengeObjective[];
   equityCurve: PricePoint[];
 }

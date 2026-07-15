@@ -6,6 +6,7 @@ import type { ChallengeAccount } from "@/lib/types";
 import { formatSignedUsd, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { ProviderBadge } from "@/components/ui/provider-badge";
 import { FeedStatusDot } from "@/components/markets/live-price";
 import { IconBell, IconShield } from "@/components/ui/icons";
 import {
@@ -32,6 +33,7 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
     { href: "/admin", label: "Overview", icon: "shield", exact: true },
     { href: "/admin/challenges", label: "Challenge rules", icon: "sliders" },
     { href: "/admin/traders", label: "Traders", icon: "users" },
+    { href: "/admin/accounts", label: "Accounts", icon: "shield" },
     { href: "/admin/branding", label: "Branding", icon: "palette" },
     { href: "/admin/markets", label: "Market templates", icon: "markets" },
   ];
@@ -40,6 +42,7 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
     { href: "/platform", label: "Overview", icon: "globe", exact: true },
     { href: "/platform/firms", label: "All firms", icon: "users" },
     { href: "/platform/markets", label: "Global templates", icon: "markets" },
+    { href: "/platform/sold-accounts", label: "Sold accounts", icon: "shield" },
   ];
 
   return [{ items: trader }, { label: "Firm admin", items: admin }, { label: "Platform", items: platform }];
@@ -96,12 +99,15 @@ export function AppShell({
           <SidebarLinks groups={groups} />
         </div>
         <div className="rounded-card border border-edge bg-surface-2 p-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-medium text-muted">{account.label}</span>
-            <Badge tone="accent">
-              <IconShield className="text-xs" />
-              {phaseLabels[account.phase]}
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              <ProviderBadge provider={account.provider} compact />
+              <Badge tone="accent">
+                <IconShield className="text-xs" />
+                {phaseLabels[account.phase]}
+              </Badge>
+            </div>
           </div>
           <p className="tabular mt-2 text-lg font-semibold">{formatUsd(account.equity)}</p>
           <p className={cn("tabular text-xs font-medium", dailyUp ? "text-up" : "text-down")}>

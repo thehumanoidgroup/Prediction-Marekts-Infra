@@ -9,6 +9,7 @@ const tabs = [
   { href: "/admin/challenges", label: "Challenge rules" },
   { href: "/admin/provisioning", label: "Provisioning" },
   { href: "/admin/traders", label: "Traders" },
+  { href: "/admin/accounts", label: "Accounts" },
   { href: "/admin/branding", label: "Branding" },
   { href: "/admin/markets", label: "Market templates" },
 ];

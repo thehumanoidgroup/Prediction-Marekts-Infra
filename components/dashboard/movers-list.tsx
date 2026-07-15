@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { Market, Outcome } from "@/lib/types";
 import { formatCompactUsd } from "@/lib/format";
 import { BetModal } from "@/components/markets/bet-modal";
+import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { LiveProbability } from "@/components/markets/live-price";
 import { Sparkline } from "@/components/ui/sparkline";
 import { cn } from "@/lib/utils";
@@ -28,9 +29,10 @@ export function MoversList({ markets }: { markets: Market[] }) {
                   <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground transition-colors group-hover:text-accent">
                     {market.question}
                   </p>
-                  <p className="mt-0.5 text-[11px] text-faint">
-                    {formatCompactUsd(market.volume)} vol
-                  </p>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <MarketSourceBadge source={market.source} compact />
+                    <p className="text-[11px] text-faint">{formatCompactUsd(market.volume)} vol</p>
+                  </div>
                 </Link>
                 <Sparkline
                   data={market.history.slice(-24)}
