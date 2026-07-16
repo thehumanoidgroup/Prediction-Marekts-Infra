@@ -8,9 +8,9 @@ import { NextResponse } from "next/server";
  */
 export async function POST(
   request: Request,
-  context: { params: Promise<{ id: string }> | { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
-  const params = await Promise.resolve(context.params);
+  const params = await context.params;
   const eventId = params.id;
   let stockTicker: string | null = null;
   try {

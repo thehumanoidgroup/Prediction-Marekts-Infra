@@ -44,6 +44,8 @@ export interface TenantOverrides {
 
 interface Store {
   markets: Market[];
+  /** Polymarket / Kalshi / S&P 500 markets registered for virtual fills + MTM. */
+  externalMarkets: Map<string, Market>;
   globalTemplates: Market[];
   platformActivity: PlatformActivity[];
   platformAnalytics: PlatformAnalyticsPoint[];
@@ -550,6 +552,7 @@ function createStore(): Store {
   const now = Date.now();
   return {
     markets: generateMarkets(now),
+    externalMarkets: new Map(),
     globalTemplates: generateGlobalTemplates(now),
     platformActivity: generatePlatformActivity(now, listTenants()),
     platformAnalytics: generatePlatformAnalytics(now),
@@ -560,11 +563,27 @@ function createStore(): Store {
   };
 }
 
+/** Register or refresh an external market so positions can mark-to-market. */
+export function ensureExternalMarket(market: Market): Market {
+  const store = getStore();
+  store.externalMarkets.set(market.id, market);
+  return market;
+}
+
+export function getRegisteredMarket(id: string): Market | null {
+  const store = getStore();
+  return store.markets.find((m) => m.id === id) ?? store.externalMarkets.get(id) ?? null;
+}
+
 const globalStore = globalThis as unknown as { __ppStore?: Store };
 
 export function getStore(): Store {
   if (!globalStore.__ppStore) {
     globalStore.__ppStore = createStore();
+  }
+  // HMR / older in-memory snapshots may lack externalMarkets.
+  if (!globalStore.__ppStore.externalMarkets) {
+    globalStore.__ppStore.externalMarkets = new Map();
   }
   return globalStore.__ppStore;
 }

@@ -1,0 +1,133 @@
+/** Sector map for liquid S&P 500 tickers used in the trader dashboard filters. */
+
+export type Sp500Sector =
+  | "Technology"
+  | "Financials"
+  | "Healthcare"
+  | "Consumer"
+  | "Energy"
+  | "Industrials"
+  | "Communication"
+  | "Other";
+
+export const SP500_SECTORS: Sp500Sector[] = [
+  "Technology",
+  "Financials",
+  "Healthcare",
+  "Consumer",
+  "Energy",
+  "Industrials",
+  "Communication",
+  "Other",
+];
+
+/** Curated dashboard universe — keep small for Alpaca free-tier quote caps. */
+export const SP500_DASHBOARD_TICKERS = [
+  "AAPL",
+  "MSFT",
+  "NVDA",
+  "AMZN",
+  "GOOGL",
+  "META",
+  "TSLA",
+  "JPM",
+  "V",
+  "UNH",
+  "XOM",
+  "JNJ",
+  "WMT",
+  "MA",
+  "PG",
+  "HD",
+  "BAC",
+  "AMD",
+  "COST",
+  "NFLX",
+  "CRM",
+  "ORCL",
+  "KO",
+  "PEP",
+  "DIS",
+  "CVX",
+  "ABBV",
+  "MRK",
+  "AVGO",
+  "LLY",
+] as const;
+
+const SECTOR_BY_TICKER: Record<string, Sp500Sector> = {
+  AAPL: "Technology",
+  MSFT: "Technology",
+  NVDA: "Technology",
+  AMD: "Technology",
+  AVGO: "Technology",
+  ORCL: "Technology",
+  CRM: "Technology",
+  ADBE: "Technology",
+  CSCO: "Technology",
+  IBM: "Technology",
+  INTU: "Technology",
+  QCOM: "Technology",
+  TXN: "Technology",
+  NOW: "Technology",
+  AMZN: "Consumer",
+  TSLA: "Consumer",
+  WMT: "Consumer",
+  HD: "Consumer",
+  COST: "Consumer",
+  MCD: "Consumer",
+  NKE: "Consumer",
+  SBUX: "Consumer",
+  TGT: "Consumer",
+  LOW: "Consumer",
+  PG: "Consumer",
+  KO: "Consumer",
+  PEP: "Consumer",
+  JPM: "Financials",
+  V: "Financials",
+  MA: "Financials",
+  BAC: "Financials",
+  WFC: "Financials",
+  GS: "Financials",
+  MS: "Financials",
+  AXP: "Financials",
+  BLK: "Financials",
+  SCHW: "Financials",
+  UNH: "Healthcare",
+  JNJ: "Healthcare",
+  LLY: "Healthcare",
+  ABBV: "Healthcare",
+  MRK: "Healthcare",
+  PFE: "Healthcare",
+  TMO: "Healthcare",
+  ABT: "Healthcare",
+  AMGN: "Healthcare",
+  ISRG: "Healthcare",
+  XOM: "Energy",
+  CVX: "Energy",
+  COP: "Energy",
+  SLB: "Energy",
+  EOG: "Energy",
+  OXY: "Energy",
+  CAT: "Industrials",
+  GE: "Industrials",
+  HON: "Industrials",
+  UNP: "Industrials",
+  BA: "Industrials",
+  RTX: "Industrials",
+  DE: "Industrials",
+  LMT: "Industrials",
+  GOOGL: "Communication",
+  GOOG: "Communication",
+  META: "Communication",
+  NFLX: "Communication",
+  DIS: "Communication",
+  CMCSA: "Communication",
+  T: "Communication",
+  VZ: "Communication",
+  TMUS: "Communication",
+};
+
+export function getSp500Sector(ticker: string): Sp500Sector {
+  return SECTOR_BY_TICKER[ticker.toUpperCase()] ?? "Other";
+}

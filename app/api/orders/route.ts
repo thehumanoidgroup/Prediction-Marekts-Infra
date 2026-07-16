@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getHybridMarket } from "@/lib/hybrid-markets";
 import { placeOrder } from "@/services";
 import type { Outcome } from "@/types";
 import { getTenantFromRequest } from "@/lib/tenant-request";
@@ -13,7 +14,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { marketId, outcome, side, shares } = (body ?? {}) as Record<string, unknown>;
+  const { marketId, outcome, side, shares, yesPrice } = (body ?? {}) as Record<string, unknown>;
   if (
     typeof marketId !== "string" ||
     (outcome !== "yes" && outcome !== "no") ||
@@ -27,11 +28,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const market = await getHybridMarket(marketId);
+    if (!market) {
+      return NextResponse.json({ error: `Unknown market: ${marketId}` }, { status: 404 });
+    }
+
     const result = placeOrder(tenant.id, {
       marketId,
       outcome: outcome as Outcome,
       side,
       shares,
+      market,
+      yesPrice: typeof yesPrice === "number" ? yesPrice : undefined,
     });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

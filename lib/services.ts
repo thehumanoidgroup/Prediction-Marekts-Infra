@@ -1,9 +1,11 @@
 import {
   createGlobalMarketTemplate,
   createMarketFromTemplate,
+  ensureExternalMarket,
   getAdminTraders as storeAdminTraders,
   getLeaderboard,
   getPlatformAnalyticsSeries,
+  getRegisteredMarket,
   getStore,
   getTenantOverrides,
   getTenantState,
@@ -83,7 +85,7 @@ export function listMarkets(filters: MarketFilters = {}): Market[] {
 }
 
 export function getMarket(id: string): Market | null {
-  return getStore().markets.find((m) => m.id === id) ?? null;
+  return getRegisteredMarket(id);
 }
 
 export function getAccount(tenantId: string): ChallengeAccount {
@@ -93,20 +95,27 @@ export function getAccount(tenantId: string): ChallengeAccount {
 export function getPositions(tenantId: string): EnrichedPosition[] {
   const state = getTenantState(tenantId);
   return state.positions.map((pos) => {
-    const market = getMarket(pos.marketId)!;
+    const market = getRegisteredMarket(pos.marketId) ?? {
+      id: pos.marketId,
+      question: pos.marketId,
+      category: "stocks" as const,
+      status: "open" as const,
+      yesPrice: pos.avgPrice,
+      change24h: 0,
+      volume: 0,
+      volume24h: 0,
+      openInterest: 0,
+      traders: 0,
+      closesAt: Date.now(),
+      history: [],
+      source: "internal" as const,
+    };
     const currentPrice = pos.outcome === "yes" ? market.yesPrice : 1 - market.yesPrice;
     const value = currentPrice * pos.shares;
     const cost = pos.avgPrice * pos.shares;
     const pnl = value - cost;
-    return {
-      ...pos,
-      market,
-      currentPrice,
-      value,
-      cost,
-      pnl,
-      pnlPct: cost > 0 ? (pnl / cost) * 100 : 0,
-    };
+    const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+    return { ...pos, market, currentPrice, value, cost, pnl, pnlPct };
   });
 }
 
@@ -154,6 +163,10 @@ export interface PlaceOrderInput {
   outcome: Outcome;
   side: "buy" | "sell";
   shares: number;
+  /** Optional market snapshot for Polymarket / Kalshi / S&P 500 virtual fills. */
+  market?: Market;
+  /** Optional YES price override from the live client tick. */
+  yesPrice?: number;
 }
 
 export interface PlaceOrderResult {
@@ -164,17 +177,29 @@ export interface PlaceOrderResult {
 /**
  * Fills an order at the current market price and updates the tenant's
  * position (weighted-average entry on buys, share reduction on sells).
+ * Supports internal LMSR markets and virtual external provider bets.
  */
 export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrderResult {
-  const market = getMarket(input.marketId);
+  let market = input.market ?? getRegisteredMarket(input.marketId);
   if (!market) throw new Error(`Unknown market: ${input.marketId}`);
+  if (market.source !== "internal") {
+    market = ensureExternalMarket(market);
+  }
   if (market.status === "resolved") throw new Error("Market is resolved");
   if (!Number.isFinite(input.shares) || input.shares <= 0) {
     throw new Error("Shares must be a positive number");
   }
 
   const state = getTenantState(tenantId);
-  const price = input.outcome === "yes" ? market.yesPrice : 1 - market.yesPrice;
+  const yesPrice =
+    typeof input.yesPrice === "number" && Number.isFinite(input.yesPrice)
+      ? Math.min(0.97, Math.max(0.03, input.yesPrice))
+      : market.yesPrice;
+  if (market.source !== "internal") {
+    market.yesPrice = yesPrice;
+    ensureExternalMarket(market);
+  }
+  const price = input.outcome === "yes" ? yesPrice : 1 - yesPrice;
   const shares = Math.floor(input.shares);
 
   const order: Order = {
@@ -237,7 +262,7 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
     executedAt: order.filledAt,
   });
 
-  return { order, position };
+  return { order, position: position! };
 }
 
 // ---------------------------------------------------------------------------

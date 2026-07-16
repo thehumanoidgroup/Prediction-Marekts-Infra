@@ -1,6 +1,8 @@
 import type { LiveEvent, LiveEventsPayload, Market, MarketViewSource } from "@/lib/types";
 import { getMockPolymarketMarkets } from "@/lib/polymarket-mock";
 import { listMarkets } from "@/lib/services";
+import { buildMarketsFromQuotes, MOCK_SPOTS } from "@/lib/sp500/generator";
+import { SP500_DASHBOARD_TICKERS } from "@/lib/sp500/sectors";
 
 interface BackendLiveEvent {
   id: string;
@@ -200,9 +202,18 @@ async function loadKalshiMarkets(refresh: boolean): Promise<Market[]> {
   }
 }
 
+async function loadSp500Markets(refresh: boolean): Promise<Market[]> {
+  try {
+    const { getActiveSp500Markets } = await import("@/lib/sp500/service");
+    return await withTimeout(getActiveSp500Markets(refresh), 8_000, []);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Live event feed for the Vercel single-app deployment.
- * Pulls in-process internal LMSR, Polymarket CLOB, and Kalshi public markets.
+ * Pulls in-process internal LMSR, Polymarket CLOB, Kalshi, and S&P 500 markets.
  */
 export async function listLiveEvents(options: {
   category?: string;
@@ -218,8 +229,9 @@ export async function listLiveEvents(options: {
   const wantInternal = source === "internal" || source === "all";
   const wantPolymarket = source === "polymarket" || source === "all";
   const wantKalshi = source === "kalshi" || source === "all";
+  const wantSp500 = source === "sp500_dynamic" || source === "all";
 
-  const [internalRaw, polymarketRaw, kalshiRaw] = await Promise.all([
+  const [internalRaw, polymarketRaw, kalshiRaw, sp500Raw] = await Promise.all([
     wantInternal
       ? Promise.resolve(
           listMarkets({
@@ -231,6 +243,7 @@ export async function listLiveEvents(options: {
       : Promise.resolve([] as Market[]),
     wantPolymarket ? loadPolymarketMarkets(refresh) : Promise.resolve([] as Market[]),
     wantKalshi ? loadKalshiMarkets(refresh) : Promise.resolve([] as Market[]),
+    wantSp500 ? loadSp500Markets(refresh) : Promise.resolve([] as Market[]),
   ]);
 
   const filterCategory = (markets: Market[]) =>
@@ -239,22 +252,25 @@ export async function listLiveEvents(options: {
   const internal = takeTop(filterCategory(internalRaw), perSource);
   const polymarket = takeTop(filterCategory(polymarketRaw), perSource);
   const kalshi = takeTop(filterCategory(kalshiRaw), perSource);
+  const sp500 = takeTop(filterCategory(sp500Raw), perSource);
 
   const markets =
     source === "all"
-      ? interleaveBySource([internal, polymarket, kalshi])
+      ? interleaveBySource([internal, polymarket, kalshi, sp500])
       : source === "internal"
         ? internal
         : source === "polymarket"
           ? polymarket
-          : kalshi;
+          : source === "kalshi"
+            ? kalshi
+            : sp500;
 
   return buildPayload(markets, source);
 }
 
 /**
  * Sync fallback for cold paths / client-side when the API is unavailable.
- * Includes mock Polymarket only — Kalshi requires a network fetch.
+ * Includes mock Polymarket and generated S&P 500 markets.
  */
 export function listFallbackLiveEvents(options: {
   category?: string;
@@ -278,6 +294,15 @@ export function listFallbackLiveEvents(options: {
     markets.push(...getMockPolymarketMarkets({ active: true }));
   }
 
+  if (source === "sp500_dynamic" || source === "all") {
+    const quotes = SP500_DASHBOARD_TICKERS.slice(0, 12).map((ticker) => ({
+      ticker,
+      lastPrice: MOCK_SPOTS[ticker] ?? 100,
+      previousClose: MOCK_SPOTS[ticker] ?? 100,
+    }));
+    markets.push(...buildMarketsFromQuotes(quotes));
+  }
+
   let filtered = markets;
   if (category !== "all") {
     filtered = filtered.filter((market) => market.category === category);
@@ -292,7 +317,11 @@ export function listFallbackLiveEvents(options: {
       filtered.filter((market) => market.source === "polymarket"),
       LIVE_EVENTS_PER_SOURCE,
     );
-    return buildPayload(interleaveBySource([internal, polymarket]), source);
+    const sp500 = takeTop(
+      filtered.filter((market) => market.source === "sp500_dynamic"),
+      LIVE_EVENTS_PER_SOURCE,
+    );
+    return buildPayload(interleaveBySource([internal, polymarket, sp500]), source);
   }
 
   return buildPayload(takeTop(filtered, LIVE_EVENTS_PER_SOURCE), source);
