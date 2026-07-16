@@ -4,10 +4,17 @@
  * Used by the trader dashboard when a long-lived Python WebSocket bridge is
  * unavailable (Vercel single-app). Only requested tickers are priced.
  *
+ * Official docs:
+ * - https://alpaca.markets/docs/
+ * - https://alpaca.markets/docs/api-references/market-data-api/
+ *
  * Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+ * Polygon.io will replace Alpaca when scaling many accounts.
  */
 
 import { NextResponse } from "next/server";
+import { fetchAlpacaWithRetry } from "@/lib/alpaca/rate-limit";
+import { sessionPhase } from "@/lib/sp500/market-calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,6 +32,9 @@ type QuoteRow = {
   previousClose?: number | null;
   bid?: number | null;
   ask?: number | null;
+  session?: string;
+  stale?: boolean;
+  thin?: boolean;
 };
 
 function parseTickers(raw: string | null): string[] {
@@ -48,23 +58,34 @@ function priceFromSnapshot(snapshot: Record<string, unknown>): QuoteRow | null {
   const prev = (snapshot.prevDailyBar ?? snapshot.prev_daily_bar ?? {}) as Record<string, unknown>;
   const quote = (snapshot.latestQuote ?? snapshot.latest_quote ?? {}) as Record<string, unknown>;
 
+  const hasTrade = typeof latestTrade.p === "number";
+  const hasDaily = typeof daily.c === "number";
   let last =
-    typeof latestTrade.p === "number"
-      ? latestTrade.p
-      : typeof daily.c === "number"
-        ? daily.c
+    hasTrade
+      ? (latestTrade.p as number)
+      : hasDaily
+        ? (daily.c as number)
         : typeof minute.c === "number"
           ? minute.c
           : null;
-  if (last == null && typeof prev.c === "number") last = prev.c;
+  const previousClose = typeof prev.c === "number" ? Number(prev.c) : null;
+  const previousCloseOnly = last == null && previousClose != null;
+  if (previousCloseOnly) last = previousClose;
   if (last == null) return null;
+
+  const phase = sessionPhase();
+  const thin = previousCloseOnly || (!hasTrade && phase === "regular");
+  const stale = previousCloseOnly || phase !== "regular";
 
   return {
     ticker: String(snapshot.symbol ?? ""),
     lastPrice: Number(last),
-    previousClose: typeof prev.c === "number" ? Number(prev.c) : null,
+    previousClose,
     bid: typeof quote.bp === "number" ? Number(quote.bp) : null,
     ask: typeof quote.ap === "number" ? Number(quote.ap) : null,
+    session: phase,
+    stale,
+    thin,
   };
 }
 
@@ -72,7 +93,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const tickers = parseTickers(searchParams.get("tickers"));
   if (tickers.length === 0) {
-    return NextResponse.json({ quotes: {}, provider: "alpaca", feed: FEED });
+    return NextResponse.json({
+      quotes: {},
+      provider: "alpaca",
+      feed: FEED,
+      session: sessionPhase(),
+    });
   }
 
   const apiKey = process.env.ALPACA_API_KEY ?? process.env.PP_ALPACA_API_KEY;
@@ -83,71 +109,98 @@ export async function GET(request: Request) {
         quotes: {},
         provider: "alpaca",
         feed: FEED,
+        session: sessionPhase(),
         error: "Alpaca credentials not configured",
       },
       { status: 200 },
     );
   }
 
-  try {
-    const url = new URL(`${ALPACA_DATA_BASE}/stocks/snapshots`);
-    url.searchParams.set("symbols", tickers.join(","));
-    url.searchParams.set("feed", FEED);
+  const url = new URL(`${ALPACA_DATA_BASE}/stocks/snapshots`);
+  url.searchParams.set("symbols", tickers.join(","));
+  url.searchParams.set("feed", FEED);
 
-    const response = await fetch(url, {
+  const { response, rateLimited, attempts, error } = await fetchAlpacaWithRetry(
+    url.toString(),
+    {
       headers: {
         "APCA-API-KEY-ID": apiKey,
         "APCA-API-SECRET-KEY": secret,
         Accept: "application/json",
       },
-      next: { revalidate: 0 },
       cache: "no-store",
-    });
+    },
+  );
 
-    if (!response.ok) {
-      const text = await response.text();
-      return NextResponse.json(
-        {
-          quotes: {},
-          provider: "alpaca",
-          feed: FEED,
-          error: `Alpaca ${response.status}: ${text.slice(0, 200)}`,
-        },
-        { status: 200 },
-      );
-    }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-    const nested = payload.snapshots;
-    const source =
-      nested && typeof nested === "object"
-        ? (nested as Record<string, unknown>)
-        : payload;
-
-    const quotes: Record<string, QuoteRow> = {};
-    for (const ticker of tickers) {
-      const raw = source[ticker];
-      if (!raw || typeof raw !== "object") continue;
-      const row = priceFromSnapshot({ ...(raw as object), symbol: ticker });
-      if (row) quotes[ticker] = row;
-    }
-
-    return NextResponse.json({
-      quotes,
-      provider: "alpaca",
-      feed: FEED,
-      // Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
-      transport: "rest",
-    });
-  } catch (error) {
+  if (!response) {
     return NextResponse.json(
       {
         quotes: {},
         provider: "alpaca",
         feed: FEED,
-        error: error instanceof Error ? error.message : "quote fetch failed",
+        session: sessionPhase(),
+        rateLimited: false,
+        attempts,
+        error: error ?? "quote fetch failed",
       },
       { status: 200 },
     );
   }
+
+  if (rateLimited || response.status === 429) {
+    return NextResponse.json(
+      {
+        quotes: {},
+        provider: "alpaca",
+        feed: FEED,
+        session: sessionPhase(),
+        rateLimited: true,
+        attempts,
+        error:
+          error ??
+          "Alpaca rate limit exceeded — serving last cached client quotes. Polygon.io will replace Alpaca when scaling many accounts.",
+      },
+      { status: 200 },
+    );
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    return NextResponse.json(
+      {
+        quotes: {},
+        provider: "alpaca",
+        feed: FEED,
+        session: sessionPhase(),
+        attempts,
+        error: `Alpaca ${response.status}: ${text.slice(0, 200)}`,
+      },
+      { status: 200 },
+    );
+  }
+
+  const payload = (await response.json()) as Record<string, unknown>;
+  const nested = payload.snapshots;
+  const source =
+    nested && typeof nested === "object"
+      ? (nested as Record<string, unknown>)
+      : payload;
+
+  const quotes: Record<string, QuoteRow> = {};
+  for (const ticker of tickers) {
+    const raw = source[ticker];
+    if (!raw || typeof raw !== "object") continue;
+    const row = priceFromSnapshot({ ...(raw as object), symbol: ticker });
+    if (row) quotes[ticker] = row;
+  }
+
+  return NextResponse.json({
+    quotes,
+    provider: "alpaca",
+    feed: FEED,
+    session: sessionPhase(),
+    attempts,
+    // Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+    transport: "rest",
+  });
 }

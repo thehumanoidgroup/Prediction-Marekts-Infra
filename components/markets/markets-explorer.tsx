@@ -19,6 +19,10 @@ function sourceTitle(source: MarketViewSource): string {
       return "Internal Markets";
     case "polymarket":
       return "Polymarket Markets";
+    case "kalshi":
+      return "Kalshi Markets";
+    case "sp500_dynamic":
+      return "S&P 500 Markets";
     default:
       return "All Markets";
   }
@@ -56,7 +60,7 @@ function MarketsExplorerBody() {
               ? "Loading markets…"
               : `${markets.length} markets · ${formatCompactUsd(totalVolume)} volume`}
             {counts && source === "all"
-              ? ` · ${counts.internal} LMSR · ${counts.polymarket} Polymarket`
+              ? ` · ${counts.internal} LMSR · ${counts.polymarket} Polymarket · ${counts.kalshi ?? 0} Kalshi · ${counts.sp500_dynamic ?? 0} S&P 500`
               : ""}
             {refreshing ? " · updating" : ""}
           </p>

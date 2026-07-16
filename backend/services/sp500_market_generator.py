@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
@@ -33,7 +33,14 @@ from app.models.account import StockExpirationType
 from app.models.live_event import LiveEventSource
 from app.runtime.catalog import now_ms
 from app.runtime.store import MarketRuntime, TradingStore, get_trading_store
-from integrations.alpaca import AlpacaClient, AlpacaError
+from integrations.alpaca import AlpacaClient, AlpacaError, AlpacaRateLimitError
+from integrations.alpaca.market_calendar import (
+    is_trading_day,
+    next_trading_day,
+    next_weekly_expiration,
+    session_phase,
+    us_equity_today,
+)
 from tasks.providers.base import IngestedEventSnapshot
 
 logger = logging.getLogger(__name__)
@@ -81,15 +88,12 @@ class Sp500GenerationResult:
 
 
 def _us_equity_today(now: datetime | None = None) -> date:
-    current = now.astimezone(_ET) if now else datetime.now(_ET)
-    return current.date()
+    return us_equity_today(now)
 
 
 def next_friday(on_or_after: date) -> date:
-    """Return the Friday on or after ``on_or_after`` (weekly close date)."""
-    # weekday(): Mon=0 … Fri=4
-    delta = (4 - on_or_after.weekday()) % 7
-    return on_or_after + timedelta(days=delta)
+    """Return the next weekly expiration (Friday, rolled past holidays)."""
+    return next_weekly_expiration(on_or_after)
 
 
 def session_close_ms(expiration: date) -> int:
@@ -183,6 +187,9 @@ def extract_prices(snapshot: dict[str, Any]) -> tuple[float | None, float | None
 
     if current is None and previous is not None:
         current = previous
+        # Tag thin / after-hours / low-volume fallbacks for callers.
+        snapshot["_thin_quote"] = True
+        snapshot["_session_phase"] = session_phase()
     return current, previous
 
 
@@ -193,16 +200,33 @@ def build_market_specs_for_ticker(
     *,
     as_of: date | None = None,
 ) -> list[GeneratedMarketSpec]:
-    """Build 6–10 binary market specs around ``spot`` for one ticker."""
+    """Build 6–10 binary market specs around ``spot`` for one ticker.
+
+    Skips 0DTE on weekends / NYSE holidays. Weekly expirations roll past
+    holiday Fridays. Low spots (< $1) are rejected as untradeable / halted.
+    """
     today = as_of or _us_equity_today()
+    if spot is None or spot < 1.0:
+        return []
+
     friday = next_friday(today)
     specs: list[GeneratedMarketSpec] = []
     seen_ids: set[str] = set()
 
-    plans: list[tuple[str, date, Sequence[float]]] = [
-        (StockExpirationType.ZERO_DTE.value, today, _ZERO_DTE_OFFSETS),
-        (StockExpirationType.WEEKLY.value, friday, _WEEKLY_OFFSETS),
-    ]
+    plans: list[tuple[str, date, Sequence[float]]] = []
+    # 0DTE only on a live cash session day.
+    if is_trading_day(today):
+        plans.append((StockExpirationType.ZERO_DTE.value, today, _ZERO_DTE_OFFSETS))
+    else:
+        # Weekend/holiday runs still seed the next session's 0DTE book.
+        plans.append(
+            (
+                StockExpirationType.ZERO_DTE.value,
+                next_trading_day(today),
+                _ZERO_DTE_OFFSETS,
+            )
+        )
+    plans.append((StockExpirationType.WEEKLY.value, friday, _WEEKLY_OFFSETS))
 
     for expiration_type, expiration_date, offsets in plans:
         for offset in offsets:
@@ -294,6 +318,11 @@ class Sp500MarketGenerator:
 
         try:
             snapshots = await client.get_snapshots_all(universe)
+        except AlpacaRateLimitError as exc:
+            # Partial success path — continue with whatever we have (may be empty).
+            result.errors.append(f"snapshots rate-limited: {exc}")
+            logger.warning("S&P 500 generator: rate limited fetching snapshots: %s", exc)
+            snapshots = {}
         except AlpacaError as exc:
             result.errors.append(f"snapshots: {exc}")
             logger.exception("S&P 500 generator: snapshot fetch failed")
@@ -313,9 +342,16 @@ class Sp500MarketGenerator:
                 # Fallback to latest trade endpoint when snapshot is thin (off-hours).
                 try:
                     spot = await client.get_current_price(symbol)
+                except AlpacaRateLimitError as exc:
+                    result.errors.append(f"{symbol}: rate-limited ({exc})")
+                    continue
                 except AlpacaError as exc:
                     result.errors.append(f"{symbol}: {exc}")
                     continue
+            if spot < 1.0:
+                # Halted / penny / delisted — skip rather than seed nonsense strikes.
+                result.errors.append(f"{symbol}: skipped low-price spot={spot}")
+                continue
             result.tickers_priced += 1
 
             specs = build_market_specs_for_ticker(

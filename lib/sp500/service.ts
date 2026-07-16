@@ -8,6 +8,7 @@
  */
 
 import type { AlpacaIntegrationStatus, Sp500DynamicMarket } from "@/lib/types";
+import { fetchAlpacaWithRetry } from "@/lib/alpaca/rate-limit";
 import {
   MOCK_SPOTS,
   buildMarketsFromQuotes,
@@ -65,7 +66,7 @@ async function fetchAlpacaQuotes(tickers: string[]): Promise<SpotQuote[] | null>
     url.searchParams.set("symbols", tickers.join(","));
     url.searchParams.set("feed", FEED);
 
-    const response = await fetch(url, {
+    const { response, rateLimited } = await fetchAlpacaWithRetry(url.toString(), {
       headers: {
         "APCA-API-KEY-ID": creds.apiKey,
         "APCA-API-SECRET-KEY": creds.secret,
@@ -73,7 +74,7 @@ async function fetchAlpacaQuotes(tickers: string[]): Promise<SpotQuote[] | null>
       },
       cache: "no-store",
     });
-    if (!response.ok) return null;
+    if (!response || rateLimited || !response.ok) return null;
 
     const payload = (await response.json()) as Record<string, unknown>;
     const nested = payload.snapshots;

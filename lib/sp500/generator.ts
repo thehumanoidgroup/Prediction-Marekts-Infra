@@ -10,6 +10,13 @@
  */
 
 import type { Sp500DynamicMarket, StockExpirationType } from "@/lib/types";
+import {
+  isTradingDay,
+  nextTradingDay,
+  nextWeeklyExpiration,
+  sessionCloseMs as calendarSessionCloseMs,
+  todayEt,
+} from "@/lib/sp500/market-calendar";
 
 const ZERO_DTE_OFFSETS = [0.01, 0.02, 0.03, -0.01] as const;
 const WEEKLY_OFFSETS = [0.01, 0.02, 0.05, -0.02] as const;
@@ -49,19 +56,11 @@ export const MOCK_SPOTS: Record<string, number> = {
 };
 
 export function nextFriday(onOrAfter: Date): Date {
-  const d = new Date(onOrAfter);
-  d.setHours(0, 0, 0, 0);
-  const delta = (5 - d.getDay() + 7) % 7;
-  d.setDate(d.getDate() + delta);
-  return d;
+  return nextWeeklyExpiration(onOrAfter);
 }
 
 export function sessionCloseMs(expiration: Date): number {
-  // 16:00 America/New_York ≈ 20:00 UTC (EDT) / 21:00 UTC (EST). Use 20:00 UTC.
-  const y = expiration.getFullYear();
-  const m = expiration.getMonth();
-  const day = expiration.getDate();
-  return Date.UTC(y, m, day, 20, 0, 0);
+  return calendarSessionCloseMs(expiration);
 }
 
 export function roundStrike(spot: number, offsetPct: number): number {
@@ -115,22 +114,7 @@ export function buildQuestion(
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function todayEt(): Date {
-  // Approximate ET calendar date via America/New_York offset formatting.
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = fmt.formatToParts(new Date());
-  const y = Number(parts.find((p) => p.type === "year")?.value);
-  const m = Number(parts.find((p) => p.type === "month")?.value);
-  const day = Number(parts.find((p) => p.type === "day")?.value);
-  return new Date(Date.UTC(y, m - 1, day));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 export interface SpotQuote {
@@ -144,7 +128,10 @@ export function buildMarketsForTicker(
   spot: number,
   previousClose?: number | null,
 ): Sp500DynamicMarket[] {
-  const today = todayEt();
+  if (!Number.isFinite(spot) || spot < 1) return [];
+
+  const today = todayEt().date;
+  const zeroDteDay = isTradingDay(today) ? today : nextTradingDay(today);
   const friday = nextFriday(today);
   const markets: Sp500DynamicMarket[] = [];
   const seen = new Set<string>();
@@ -154,12 +141,15 @@ export function buildMarketsForTicker(
     expiration: Date;
     offsets: readonly number[];
   }> = [
-    { expirationType: "0dte", expiration: today, offsets: ZERO_DTE_OFFSETS },
+    { expirationType: "0dte", expiration: zeroDteDay, offsets: ZERO_DTE_OFFSETS },
     { expirationType: "weekly", expiration: friday, offsets: WEEKLY_OFFSETS },
   ];
 
   const changePct =
     previousClose && previousClose > 0 ? (spot - previousClose) / previousClose : 0;
+  // Low-volume / after-hours previous-close-only books get muted synthetic volume.
+  const thinBook = !previousClose || Math.abs(changePct) < 0.0005;
+  const volumeScale = thinBook ? 0.35 : 1;
 
   for (const plan of plans) {
     const expIso = isoDate(plan.expiration);
@@ -170,7 +160,8 @@ export function buildMarketsForTicker(
       seen.add(id);
 
       const yesPrice = impliedYesPrice(spot, strike);
-      const volumeBase = 40_000 + Math.abs(changePct) * 500_000 + Math.random() * 80_000;
+      const volumeBase =
+        (40_000 + Math.abs(changePct) * 500_000 + Math.random() * 80_000) * volumeScale;
 
       markets.push({
         id,

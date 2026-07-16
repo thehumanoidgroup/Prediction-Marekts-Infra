@@ -75,8 +75,8 @@ export function useLiveEventsFeed(
 
     if (source === "all" && limit) {
       // Keep a balanced mix so Polymarket/Kalshi are not crowded out by internal volume.
-      const groups = (["internal", "polymarket", "kalshi"] as const).map((key) =>
-        events.filter((event) => event.source === key).sort(byActivity),
+      const groups = (["internal", "polymarket", "kalshi", "sp500_dynamic"] as const).map(
+        (key) => events.filter((event) => event.source === key).sort(byActivity),
       );
       const mixed: LiveEvent[] = [];
       let added = true;

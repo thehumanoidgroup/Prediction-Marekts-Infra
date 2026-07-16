@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { MarketViewSource } from "@/lib/types";
 
 const options: { id: MarketViewSource; label: string; description: string }[] = [
-  { id: "all", label: "All Markets", description: "Internal + external" },
+  { id: "all", label: "All Markets", description: "LMSR + Poly + Kalshi + S&P" },
   { id: "internal", label: "Internal", description: "PropPredict LMSR" },
   { id: "polymarket", label: "Polymarket", description: "Live CLOB feed" },
   { id: "kalshi", label: "Kalshi", description: "Live Kalshi feed" },
@@ -61,7 +61,7 @@ export function MarketSourceToggle({
           >
             <span className="block text-xs font-semibold sm:text-sm">{option.label}</span>
             <span className="mt-0.5 hidden text-[10px] text-faint sm:block">{option.description}</span>
-            {option.id === "polymarket" && active ? (
+            {(option.id === "polymarket" || option.id === "sp500_dynamic") && active ? (
               <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-up live-pulse" />
             ) : null}
             {option.id === "all" && active ? (

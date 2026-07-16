@@ -71,3 +71,5 @@ async def test_bridge_reconcile_subscribes_only_viewed() -> None:
     stream.subscribe.assert_awaited()
     args = stream.subscribe.await_args.kwargs
     assert set(args["trades"]) == {"AAPL", "MSFT"}
+    # Efficient free-tier usage: trades-only (no quote channel fan-out).
+    assert args.get("quotes") in ([], None)

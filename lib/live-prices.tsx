@@ -257,12 +257,10 @@ export function LivePricesProvider({
       }
       return next;
     });
-    for (const event of incoming) {
-      if (event.source === "sp500_dynamic" && event.stockTicker) {
-        registerViewedTicker(event.stockTicker);
-      }
-    }
-  }, [registerViewedTicker]);
+    // Do not auto-register every sp500_dynamic ticker from feed merges —
+    // that floods the free-tier 30-symbol envelope. Cards call
+    // useRegisterViewedTicker / useLiveEventView when actually on screen.
+  }, []);
 
   const optimisticUpdatePrice = useCallback((marketId: string, yes: number) => {
     const normalized = clamp(yes);
