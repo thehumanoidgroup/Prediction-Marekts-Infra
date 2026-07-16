@@ -23,7 +23,7 @@ def _market_status(closes_at: int) -> str:
 
 
 def serialize_market(m: MarketRuntime) -> dict:
-    return {
+    payload = {
         "id": m.seed_id,
         "question": m.question,
         "category": m.category,
@@ -36,8 +36,18 @@ def serialize_market(m: MarketRuntime) -> dict:
         "traders": m.traders,
         "closesAt": m.closes_at,
         "history": m.history,
-        "source": "internal",
+        "source": m.source or "internal",
+        "provider": m.source or "internal",
     }
+    if m.stock_ticker:
+        payload["stockTicker"] = m.stock_ticker
+    if m.strike_price is not None:
+        payload["strikePrice"] = m.strike_price
+    if m.expiration_type:
+        payload["expirationType"] = m.expiration_type
+    if m.expiration_date:
+        payload["expirationDate"] = m.expiration_date
+    return payload
 
 
 def serialize_journal(entry: JournalRecord) -> dict:

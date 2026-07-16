@@ -51,6 +51,12 @@ class MarketRuntime:
     closes_at: int = 0
     history: list[dict[str, float | int]] = field(default_factory=list)
     change_24h: float = 0.0
+    # Multi-provider metadata (defaults keep seeded LMSR markets as internal).
+    source: str = "internal"
+    stock_ticker: str | None = None
+    strike_price: float | None = None
+    expiration_type: str | None = None
+    expiration_date: str | None = None
 
     @property
     def yes_price(self) -> float:
@@ -120,7 +126,68 @@ class TradingStore:
                 traders=int(120 + seed.volume_scale * 50),
                 closes_at=ts + seed.days_to_close * DAY_MS,
                 history=history,
+                source="internal",
             )
+
+    def create_market(
+        self,
+        *,
+        market_id: str,
+        question: str,
+        category: str,
+        base_price: float,
+        closes_at: int,
+        volume_scale: float = 1.0,
+        source: str = "internal",
+        stock_ticker: str | None = None,
+        strike_price: float | None = None,
+        expiration_type: str | None = None,
+        expiration_date: str | None = None,
+        liquidity: float = 400.0,
+    ) -> tuple[MarketRuntime, bool]:
+        """Create an LMSR market or return the existing one (idempotent).
+
+        Returns ``(market, created)`` where ``created`` is False when
+        ``market_id`` was already present.
+        """
+        with self._lock:
+            existing = self._markets.get(market_id)
+            if existing is not None:
+                return existing, False
+
+            maker = LMSRMarketMaker(
+                LMSRConfig(num_outcomes=2, liquidity=liquidity, fee_rate=0.01)
+            )
+            target = _clamp_price(base_price)
+            for _ in range(24):
+                current = maker.prices()[0]
+                if abs(current - target) < 0.015:
+                    break
+                if current < target:
+                    maker.execute_buy(0, 40)
+                else:
+                    maker.execute_buy(1, 40)
+
+            ts = now_ms()
+            history = [{"t": ts - (11 - i) * HOUR_MS, "p": target} for i in range(12)]
+            runtime = MarketRuntime(
+                seed_id=market_id,
+                question=question,
+                category=category,
+                maker=maker,
+                volume=volume_scale * 900_000,
+                volume_24h=volume_scale * 50_000,
+                traders=int(120 + volume_scale * 50),
+                closes_at=closes_at,
+                history=history,
+                source=source,
+                stock_ticker=stock_ticker,
+                strike_price=strike_price,
+                expiration_type=expiration_type,
+                expiration_date=expiration_date,
+            )
+            self._markets[market_id] = runtime
+            return runtime, True
 
     def market_prices(self) -> dict[str, list[float]]:
         with self._lock:

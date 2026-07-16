@@ -79,6 +79,33 @@ class Settings(BaseSettings):
     kalshi_max_retries: int = 3
     kalshi_retry_backoff_seconds: float = 0.5
 
+    # Alpaca Market Data API (IEX free tier — paper keys for MVP)
+    # Docs: https://alpaca.markets/docs/api-references/market-data-api/
+    # Replace with Polygon.io client when scaling.
+    alpaca_api_key: str | None = None
+    alpaca_secret_key: str | None = None
+    alpaca_data_base_url: str = "https://data.alpaca.markets/v2"
+    alpaca_iex_stream_url: str = "wss://stream.data.alpaca.markets/v2/iex"
+    alpaca_feed: str = "iex"
+    alpaca_request_timeout_seconds: float = 30.0
+    alpaca_rate_limit_per_minute: int = 180
+    alpaca_max_retries: int = 3
+    alpaca_retry_backoff_seconds: float = 0.5
+    alpaca_cache_ttl_seconds: float = 60.0
+    alpaca_price_cache_ttl_seconds: float = 15.0
+    alpaca_list_cache_ttl_seconds: float = 86_400.0
+    alpaca_bars_cache_ttl_seconds: float = 3_600.0
+    alpaca_ws_max_symbols: int = 30
+
+    # S&P 500 dynamic market generator (Alpaca IEX MVP).
+    # Alpaca used for MVP. Will switch to Polygon for scale.
+    sp500_generator_enabled: bool = True
+    sp500_generator_interval_seconds: float = 86_400.0
+    # Cap tickers processed per daily run (free-tier rate limits).
+    sp500_generator_ticker_limit: int | None = 50
+    # Run shortly after the loop starts when True (useful in development).
+    sp500_generator_run_on_startup: bool = False
+
     # Account provisioning
     provisioning_email_enabled: bool = True
     webhook_secret: str | None = None
@@ -100,6 +127,11 @@ class Settings(BaseSettings):
             "yes",
         }:
             data["kalshi_use_demo"] = True
+        # Alpaca paper/live keys (unprefixed names requested for MVP).
+        if data.get("alpaca_api_key") is None and os.environ.get("ALPACA_API_KEY"):
+            data["alpaca_api_key"] = os.environ["ALPACA_API_KEY"]
+        if data.get("alpaca_secret_key") is None and os.environ.get("ALPACA_SECRET_KEY"):
+            data["alpaca_secret_key"] = os.environ["ALPACA_SECRET_KEY"]
         return data
 
 
