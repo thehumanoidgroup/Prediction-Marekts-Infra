@@ -3,7 +3,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PolymarketMarket } from "@/lib/types";
+import type { Outcome, PolymarketMarket } from "@/lib/types";
 import {
   formatCents,
   formatCompactUsd,
@@ -66,9 +66,15 @@ function outcomePrices(market: PolymarketMarket) {
 
 export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOutcome, setDetailOutcome] = useState<Outcome>("yes");
   const prices = useMemo(() => outcomePrices(market), [market]);
   const volume = market.volume24h || market.volume;
   const up = market.change24h >= 0;
+
+  const openDetail = (outcome: Outcome) => {
+    setDetailOutcome(outcome);
+    setDetailOpen(true);
+  };
 
   return (
     <>
@@ -143,7 +149,7 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
               variant="secondary"
               size="sm"
               className="h-10 border-up/25 bg-up-soft/30 font-semibold text-up hover:bg-up-soft/50"
-              onClick={() => setDetailOpen(true)}
+              onClick={() => openDetail("yes")}
             >
               Yes {formatCents(prices.yes)}
             </Button>
@@ -151,7 +157,7 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
               variant="secondary"
               size="sm"
               className="h-10 border-down/25 bg-down-soft/30 font-semibold text-down hover:bg-down-soft/50"
-              onClick={() => setDetailOpen(true)}
+              onClick={() => openDetail("no")}
             >
               No {formatCents(prices.no)}
             </Button>
@@ -173,6 +179,7 @@ export function PolymarketMarketCard({ market }: { market: PolymarketMarket }) {
       <PolymarketDetailModal
         market={market}
         open={detailOpen}
+        initialOutcome={detailOutcome}
         onClose={() => setDetailOpen(false)}
       />
     </>

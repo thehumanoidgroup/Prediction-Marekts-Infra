@@ -1,30 +1,40 @@
 "use client";
 
-import { useEffect } from "react";
-import type { PolymarketMarket } from "@/lib/types";
+import { useEffect, useState } from "react";
+import type { Outcome, PolymarketMarket } from "@/lib/types";
 import { formatCents, formatCompactUsd, formatDate, formatTimeUntil } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconClose } from "@/components/ui/icons";
 import { PolymarketExternalLink } from "@/components/markets/polymarket-market-card";
+import { BetModal } from "@/components/markets/bet-modal";
 import { cn } from "@/lib/utils";
 
 export function PolymarketDetailModal({
   market,
   open,
   onClose,
+  initialOutcome = "yes",
 }: {
   market: PolymarketMarket;
   open: boolean;
   onClose: () => void;
+  initialOutcome?: Outcome;
 }) {
+  const [betOpen, setBetOpen] = useState(false);
+  const [betOutcome, setBetOutcome] = useState<Outcome>(initialOutcome);
   const volume = market.volume24h || market.volume;
   const outcomes = market.outcomes ?? [];
+  const tradeable = market.status !== "resolved" && market.acceptingOrders !== false;
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      setBetOpen(false);
+      return undefined;
+    }
+    setBetOutcome(initialOutcome);
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !betOpen) onClose();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -32,9 +42,24 @@ export function PolymarketDetailModal({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open, onClose]);
+  }, [open, onClose, initialOutcome, betOpen]);
 
   if (!open) return null;
+
+  if (betOpen) {
+    return (
+      <BetModal
+        marketId={market.id}
+        question={market.question}
+        initialYesPrice={market.yesPrice}
+        initialOutcome={betOutcome}
+        onClose={() => {
+          setBetOpen(false);
+          onClose();
+        }}
+      />
+    );
+  }
 
   return (
     <div
@@ -74,34 +99,63 @@ export function PolymarketDetailModal({
 
           <div className="grid gap-2 sm:grid-cols-2">
             {outcomes.length > 0 ? (
-              outcomes.map((outcome) => (
-                <div
-                  key={`${outcome.tokenId}-${outcome.label}`}
-                  className={cn(
-                    "rounded-lg border px-3 py-2.5",
-                    outcome.winner
-                      ? "border-accent/40 bg-accent-soft/30"
-                      : "border-edge bg-surface-2",
-                  )}
-                >
-                  <p className="text-xs font-medium text-muted">{outcome.label}</p>
-                  <p className="tabular mt-1 text-xl font-bold">{formatCents(outcome.price)}</p>
-                </div>
-              ))
+              outcomes.map((outcome) => {
+                const isYes = /^(yes|y)$/i.test(outcome.label ?? "");
+                const isNo = /^(no|n)$/i.test(outcome.label ?? "");
+                const mapped: Outcome | null = isYes ? "yes" : isNo ? "no" : null;
+                return (
+                  <button
+                    key={`${outcome.tokenId}-${outcome.label}`}
+                    type="button"
+                    disabled={!tradeable || !mapped}
+                    onClick={() => {
+                      if (!mapped) return;
+                      setBetOutcome(mapped);
+                      setBetOpen(true);
+                    }}
+                    className={cn(
+                      "rounded-lg border px-3 py-2.5 text-left transition-colors",
+                      outcome.winner
+                        ? "border-accent/40 bg-accent-soft/30"
+                        : "border-edge bg-surface-2 hover:border-edge-strong",
+                      tradeable && mapped ? "cursor-pointer" : "cursor-default opacity-80",
+                    )}
+                  >
+                    <p className="text-xs font-medium text-muted">{outcome.label}</p>
+                    <p className="tabular mt-1 text-xl font-bold">{formatCents(outcome.price)}</p>
+                  </button>
+                );
+              })
             ) : (
               <>
-                <div className="rounded-lg border border-up/20 bg-up-soft/40 px-3 py-2.5">
+                <button
+                  type="button"
+                  disabled={!tradeable}
+                  onClick={() => {
+                    setBetOutcome("yes");
+                    setBetOpen(true);
+                  }}
+                  className="rounded-lg border border-up/20 bg-up-soft/40 px-3 py-2.5 text-left hover:border-up/40"
+                >
                   <p className="text-xs font-medium text-up">Yes</p>
                   <p className="tabular mt-1 text-xl font-bold text-up">
                     {formatCents(market.yesPrice)}
                   </p>
-                </div>
-                <div className="rounded-lg border border-down/20 bg-down-soft/40 px-3 py-2.5">
+                </button>
+                <button
+                  type="button"
+                  disabled={!tradeable}
+                  onClick={() => {
+                    setBetOutcome("no");
+                    setBetOpen(true);
+                  }}
+                  className="rounded-lg border border-down/20 bg-down-soft/40 px-3 py-2.5 text-left hover:border-down/40"
+                >
                   <p className="text-xs font-medium text-down">No</p>
                   <p className="tabular mt-1 text-xl font-bold text-down">
                     {formatCents(1 - market.yesPrice)}
                   </p>
-                </div>
+                </button>
               </>
             )}
           </div>
@@ -127,10 +181,21 @@ export function PolymarketDetailModal({
             </div>
           </dl>
 
+          <p className="text-[11px] text-faint">
+            Virtual evaluation bet — uses your demo balance. Prices track live Polymarket odds;
+            P&amp;L is simulated on-platform.
+          </p>
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-edge pt-4">
             <PolymarketExternalLink market={market} />
-            <Button disabled title="Direct Polymarket trading integration coming soon">
-              Place bet (coming soon)
+            <Button
+              disabled={!tradeable}
+              onClick={() => {
+                setBetOutcome(initialOutcome);
+                setBetOpen(true);
+              }}
+            >
+              Place virtual bet
             </Button>
           </div>
         </div>

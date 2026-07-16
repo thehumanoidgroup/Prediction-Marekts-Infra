@@ -64,7 +64,7 @@ export function TradePanel({
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marketId, outcome, side, shares }),
+        body: JSON.stringify({ marketId, outcome, side, shares, yesPrice }),
       });
       const body = await response.json();
       if (!response.ok) {
@@ -73,7 +73,7 @@ export function TradePanel({
       }
       setMessage({
         tone: "up",
-        text: `Filled ${side} ${shares} ${outcome.toUpperCase()} @ ${formatCents(price)}`,
+        text: `Filled ${side} ${shares} ${outcome.toUpperCase()} @ ${formatCents(body.order?.price ?? price)}`,
       });
       notifyPortfolioRefresh();
       router.refresh();

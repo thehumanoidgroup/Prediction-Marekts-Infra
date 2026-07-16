@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hydrateTenantPortfolio } from "@/lib/portfolio-persistence";
 import { getRequestTenant } from "@/lib/tenant-server";
 import { getAccount, getPortfolioSummary, getPositions } from "@/lib/services";
 import { formatPct, formatSignedUsd, formatUsd, formatUsdPrecise } from "@/lib/format";
@@ -13,6 +14,7 @@ export const metadata: Metadata = { title: "Portfolio" };
 
 export default async function PortfolioPage() {
   const tenant = await getRequestTenant();
+  await hydrateTenantPortfolio(tenant.id);
   const account = getAccount(tenant.id);
   const summary = getPortfolioSummary(tenant.id);
   const positions = getPositions(tenant.id);
