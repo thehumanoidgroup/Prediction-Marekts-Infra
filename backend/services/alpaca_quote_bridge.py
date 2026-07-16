@@ -1,6 +1,12 @@
 """Alpaca IEX WebSocket bridge → PropPredict live event broadcasts.
 
 Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+Polygon.io will replace Alpaca when scaling many accounts.
+
+Official docs:
+- https://alpaca.markets/docs/
+- https://alpaca.markets/docs/api-references/market-data-api/
+- https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/realtime/
 
 Subscribes **only to actively viewed** S&P 500 tickers (from live feed
 analytics / card view tracking), fans trade/quote updates through the

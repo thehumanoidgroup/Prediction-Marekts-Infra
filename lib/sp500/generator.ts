@@ -1,6 +1,12 @@
 /**
  * S&P 500 dynamic binary market specs (Alpaca IEX → LMSR seed).
  * Mirrors backend/services/sp500_market_generator.py for the Vercel single-app path.
+ *
+ * Official Alpaca docs:
+ * - https://alpaca.markets/docs/
+ * - https://alpaca.markets/docs/api-references/market-data-api/
+ *
+ * Polygon.io will replace Alpaca when scaling many accounts.
  */
 
 import type { Sp500DynamicMarket, StockExpirationType } from "@/lib/types";

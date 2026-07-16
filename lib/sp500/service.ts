@@ -1,6 +1,13 @@
-/** S&P 500 dynamic markets for the Vercel single-app path (Alpaca IEX + mock fallback). */
+/** S&P 500 dynamic markets for the Vercel single-app path (Alpaca IEX + mock fallback).
+ *
+ * Official Alpaca docs:
+ * - https://alpaca.markets/docs/
+ * - https://alpaca.markets/docs/api-references/market-data-api/
+ *
+ * Polygon.io will replace Alpaca when scaling many accounts.
+ */
 
-import type { Sp500DynamicMarket } from "@/lib/types";
+import type { AlpacaIntegrationStatus, Sp500DynamicMarket } from "@/lib/types";
 import {
   MOCK_SPOTS,
   buildMarketsFromQuotes,
@@ -10,6 +17,7 @@ import { SP500_DASHBOARD_TICKERS } from "@/lib/sp500/sectors";
 
 const CACHE_TTL_MS = Number(process.env.SP500_MARKETS_CACHE_TTL_SECONDS ?? 45) * 1000;
 
+// Market Data REST root — https://alpaca.markets/docs/api-references/market-data-api/
 const ALPACA_DATA_BASE =
   process.env.ALPACA_DATA_BASE_URL ??
   process.env.PP_ALPACA_DATA_BASE_URL ??
@@ -17,12 +25,22 @@ const ALPACA_DATA_BASE =
 
 const FEED = process.env.ALPACA_FEED ?? process.env.PP_ALPACA_FEED ?? "iex";
 
+const SCALING_NOTE =
+  "Polygon.io will replace Alpaca when scaling many accounts";
+
 interface CacheEntry {
   expires: number;
   markets: Sp500DynamicMarket[];
 }
 
 let cache: CacheEntry | null = null;
+
+function alpacaCredentials(): { apiKey: string; secret: string } | null {
+  const apiKey = process.env.ALPACA_API_KEY ?? process.env.PP_ALPACA_API_KEY;
+  const secret = process.env.ALPACA_SECRET_KEY ?? process.env.PP_ALPACA_SECRET_KEY;
+  if (!apiKey?.trim() || !secret?.trim()) return null;
+  return { apiKey: apiKey.trim(), secret: secret.trim() };
+}
 
 function mockQuotes(tickers: string[]): SpotQuote[] {
   return tickers.map((ticker) => {
@@ -38,9 +56,9 @@ function mockQuotes(tickers: string[]): SpotQuote[] {
 }
 
 async function fetchAlpacaQuotes(tickers: string[]): Promise<SpotQuote[] | null> {
-  const apiKey = process.env.ALPACA_API_KEY ?? process.env.PP_ALPACA_API_KEY;
-  const secret = process.env.ALPACA_SECRET_KEY ?? process.env.PP_ALPACA_SECRET_KEY;
-  if (!apiKey || !secret || tickers.length === 0) return null;
+  // GET /v2/stocks/snapshots — https://alpaca.markets/docs/api-references/market-data-api/
+  const creds = alpacaCredentials();
+  if (!creds || tickers.length === 0) return null;
 
   try {
     const url = new URL(`${ALPACA_DATA_BASE}/stocks/snapshots`);
@@ -49,8 +67,8 @@ async function fetchAlpacaQuotes(tickers: string[]): Promise<SpotQuote[] | null>
 
     const response = await fetch(url, {
       headers: {
-        "APCA-API-KEY-ID": apiKey,
-        "APCA-API-SECRET-KEY": secret,
+        "APCA-API-KEY-ID": creds.apiKey,
+        "APCA-API-SECRET-KEY": creds.secret,
         Accept: "application/json",
       },
       cache: "no-store",
@@ -92,6 +110,76 @@ async function fetchAlpacaQuotes(tickers: string[]): Promise<SpotQuote[] | null>
     return quotes.length > 0 ? quotes : null;
   } catch {
     return null;
+  }
+}
+
+/** Super Admin health probe for Alpaca Market Data (IEX). */
+export async function getAlpacaIntegrationStatus(): Promise<AlpacaIntegrationStatus> {
+  const creds = alpacaCredentials();
+  const started = Date.now();
+  const base = {
+    provider: "alpaca" as const,
+    enabled: true,
+    baseUrl: ALPACA_DATA_BASE,
+    feed: FEED,
+    sp500TickerCount: SP500_DASHBOARD_TICKERS.length,
+    scalingNote: SCALING_NOTE,
+  };
+
+  if (!creds) {
+    return {
+      ...base,
+      healthy: false,
+      authMode: "unconfigured" as const,
+      hasApiCredentials: false,
+      api: "unconfigured",
+      sampleTicker: null,
+      samplePrice: null,
+      latencyMs: Date.now() - started,
+      error:
+        "Set ALPACA_API_KEY and ALPACA_SECRET_KEY (paper keys). Docs: https://alpaca.markets/docs/",
+    };
+  }
+
+  try {
+    const quotes = await fetchAlpacaQuotes(["AAPL"]);
+    const sample = quotes?.[0];
+    if (!sample) {
+      return {
+        ...base,
+        healthy: false,
+        authMode: "authenticated" as const,
+        hasApiCredentials: true,
+        api: "error",
+        sampleTicker: "AAPL",
+        samplePrice: null,
+        latencyMs: Date.now() - started,
+        error: "Snapshot probe returned no quote for AAPL",
+      };
+    }
+    return {
+      ...base,
+      healthy: true,
+      authMode: "authenticated" as const,
+      hasApiCredentials: true,
+      api: "connected",
+      sampleTicker: sample.ticker,
+      samplePrice: sample.lastPrice,
+      latencyMs: Date.now() - started,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      healthy: false,
+      authMode: "authenticated" as const,
+      hasApiCredentials: true,
+      api: "error",
+      sampleTicker: "AAPL",
+      samplePrice: null,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : "Alpaca API unreachable",
+    };
   }
 }
 
