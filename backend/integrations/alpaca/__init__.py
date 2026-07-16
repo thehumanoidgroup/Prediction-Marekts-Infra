@@ -35,6 +35,13 @@ from .exceptions import (
     AlpacaTimeoutError,
     AlpacaWebSocketError,
 )
+from .market_calendar import (
+    is_trading_day,
+    next_trading_day,
+    next_weekly_expiration,
+    session_phase,
+    us_equity_today,
+)
 from .sp500_tickers import SP500_TICKERS
 
 __all__ = [
@@ -51,4 +58,9 @@ __all__ = [
     "AlpacaWebSocketError",
     "SP500_TICKERS",
     "get_alpaca_service",
+    "is_trading_day",
+    "next_trading_day",
+    "next_weekly_expiration",
+    "session_phase",
+    "us_equity_today",
 ]

@@ -242,12 +242,31 @@ class AlpacaClient:
             return {}
 
         out: dict[str, dict[str, Any]] = {}
-        for batch in _chunked(symbols, max(1, chunk_size)):
-            payload = await self._request(
-                "GET",
-                "/stocks/snapshots",
-                params={"symbols": ",".join(batch), "feed": self.feed},
-            )
+        # Smaller chunks keep free-tier URLs short and rate budgets predictable
+        # when pricing 500+ tickers. Docs:
+        # https://alpaca.markets/docs/api-references/market-data-api/
+        effective_chunk = max(1, min(chunk_size, 40))
+        failures = 0
+        for batch in _chunked(symbols, effective_chunk):
+            try:
+                payload = await self._request(
+                    "GET",
+                    "/stocks/snapshots",
+                    params={"symbols": ",".join(batch), "feed": self.feed},
+                )
+            except AlpacaRateLimitError:
+                failures += 1
+                logger.warning(
+                    "Alpaca snapshots rate-limited on batch of %s (continuing)",
+                    len(batch),
+                )
+                # Cool down before the next chunk so one 429 does not cascade.
+                await asyncio.sleep(min(8.0, 1.5 * failures))
+                continue
+            except AlpacaError as exc:
+                failures += 1
+                logger.warning("Alpaca snapshots batch failed (%s): %s", len(batch), exc)
+                continue
             # Prefer nested ``snapshots`` map when present; else symbol-keyed object.
             # Docs: https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/snapshots/
             nested = payload.get("snapshots")
@@ -256,9 +275,20 @@ class AlpacaClient:
                 if symbol == "snapshots" or not isinstance(snapshot, dict):
                     continue
                 # Skip non-snapshot envelope keys if any.
-                if "latestTrade" not in snapshot and "latestQuote" not in snapshot and "dailyBar" not in snapshot:
+                if (
+                    "latestTrade" not in snapshot
+                    and "latestQuote" not in snapshot
+                    and "dailyBar" not in snapshot
+                    and "latest_trade" not in snapshot
+                    and "daily_bar" not in snapshot
+                ):
                     continue
                 out[str(symbol).upper()] = {"symbol": str(symbol).upper(), **snapshot}
+        if not out and failures:
+            raise AlpacaRateLimitError(
+                f"Alpaca snapshots failed for all batches ({failures} failures). "
+                "Back off or replace with Polygon.io when scaling."
+            )
         return out
 
     async def get_daily_bars(

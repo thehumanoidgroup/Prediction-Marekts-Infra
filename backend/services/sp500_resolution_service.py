@@ -29,6 +29,7 @@ from app.runtime.catalog import now_ms
 from app.runtime.store import TradingStore, get_trading_store
 from integrations.alpaca import AlpacaClient, AlpacaError
 from realtime.event_broadcaster import broadcast_live_event_changes
+from integrations.alpaca.market_calendar import is_trading_day
 from services.sp500_market_generator import session_close_ms
 
 logger = logging.getLogger(__name__)
@@ -266,6 +267,22 @@ class Sp500ResolutionService:
                 "market_id": event.external_id,
                 "status": "skipped",
                 "reason": "incomplete_market",
+            }
+
+        # Holiday / weekend expiration — wait for the next official session bar
+        # rather than hammering Alpaca and writing FAILED audits.
+        if not is_trading_day(exp_date):
+            await self._write_audit(
+                db,
+                event=event,
+                status=ResolutionAuditStatus.SKIPPED,
+                attempt=1,
+                metadata={"reason": "non_trading_day", "expiration_date": exp_date.isoformat()},
+            )
+            return {
+                "market_id": event.external_id,
+                "status": "skipped",
+                "reason": "non_trading_day",
             }
 
         attempts = max_retries if max_retries is not None else self._settings.sp500_resolution_max_retries

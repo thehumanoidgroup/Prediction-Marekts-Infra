@@ -208,3 +208,120 @@ def test_provisioned_account_trades_sp500_with_rules_enforced(
     # Allowlist is attached to the trading session for the API layer.
     assert "ZZZZ" not in {t.upper() for t in session.sp500_tickers}
     assert session.provider == "sp500_dynamic"
+
+
+@pytest.mark.asyncio
+async def test_full_prop_firm_sp500_account_e2e(
+    client: TestClient,
+    email_mock,
+) -> None:
+    """Sample prop firm purchase → provision → hybrid markets → rules → allowlist."""
+    email = "apex-sp500-e2e@example.com"
+
+    purchase = client.post(
+        "/api/v1/webhooks/accounts",
+        headers=APEX_HEADERS,
+        json={
+            "email": email,
+            "provider": "sp500_dynamic",
+            "account_size": 25_000,
+            "model_type": "1step",
+            "external_order_id": "apex-spx-e2e-001",
+            "challenge_rules": {
+                "max_stake_per_order": 500,
+                "profit_target_pct": 10,
+                "max_daily_loss_pct": 5,
+            },
+        },
+    )
+    assert purchase.status_code == 201, purchase.text
+    body = purchase.json()
+    assert body["provider"] == "sp500_dynamic"
+    assert body["sp500_dynamic_enabled"] is True
+    tickers = [t.upper() for t in body["sp500_tickers"]]
+    assert "AAPL" in tickers
+    assert "MSFT" in tickers
+
+    store = get_trading_store()
+    # Seed allowlisted + off-allowlist markets for hybrid listing.
+    for market_id, ticker, strike in [
+        ("sp500-AAPL-0dte-2026-07-16-210", "AAPL", 210.0),
+        ("sp500-MSFT-0dte-2026-07-16-420", "MSFT", 420.0),
+        ("sp500-ZZZZ-0dte-2026-07-16-10", "ZZZZ", 10.0),
+    ]:
+        store.create_market(
+            market_id=market_id,
+            question=f"Will {ticker} close above ${strike:.0f} today?",
+            category="stocks",
+            base_price=0.5,
+            closes_at=now_ms() + 3_600_000,
+            source="sp500_dynamic",
+            stock_ticker=ticker,
+            strike_price=strike,
+            expiration_type="0dte",
+            expiration_date="2026-07-16",
+        )
+
+    from app.runtime.hybrid_markets import list_hybrid_markets
+
+    hybrid = await list_hybrid_markets(source="sp500_dynamic", sp500_tickers=tickers)
+    assert hybrid["counts"]["sp500_dynamic"] >= 2
+    listed = {m["id"] for m in hybrid["markets"]}
+    assert "sp500-AAPL-0dte-2026-07-16-210" in listed
+    assert "sp500-MSFT-0dte-2026-07-16-420" in listed
+    assert "sp500-ZZZZ-0dte-2026-07-16-10" not in listed
+
+    program = {
+        "starting_balance": body["account_size"],
+        "account_sizes": [int(body["account_size"])],
+        "profit_target_pct": body["applied_rules"]["profit_target_pct"],
+        "max_daily_loss_pct": body["applied_rules"]["max_daily_loss_pct"],
+        "max_drawdown_pct": body["applied_rules"]["max_drawdown_pct"],
+        "drawdown_mode": body["applied_rules"]["drawdown_mode"],
+        "max_stake_per_order": 500,
+        "min_trading_days": body["applied_rules"]["min_trading_days"],
+        "provider": "sp500_dynamic",
+    }
+    session = store.reset_session(
+        "apex",
+        body["user_id"],
+        program,
+        provider="sp500_dynamic",
+        sp500_tickers=tickers,
+        demo_account_id=body["account_id"],
+    )
+
+    # Oversized stake blocked by challenge rules.
+    blocked = store.preview_order_risk(
+        session,
+        market_id="sp500-AAPL-0dte-2026-07-16-210",
+        outcome="yes",
+        side="buy",
+        shares=5_000,
+        yes_price=0.55,
+    )
+    assert blocked["allowed"] is False
+
+    # Valid virtual bet fills and updates equity / risk.
+    filled = store.place_order(
+        session,
+        market_id="sp500-AAPL-0dte-2026-07-16-210",
+        outcome="yes",
+        side="buy",
+        shares=40,
+    )
+    assert filled["order"]["marketId"].startswith("sp500-AAPL-")
+    store.sync_session_risk(session)
+    assert session.risk.status.value == "active"
+    assert any(p.market_id.startswith("sp500-AAPL-") for p in session.bankroll.positions())
+
+    # Off-allowlist ticker is not in the provisioned universe.
+    assert "ZZZZ" not in {t.upper() for t in session.sp500_tickers}
+
+    # Sold-accounts listing exposes the provider for Super Admin filters.
+    sold = client.get("/api/v1/platform/sold-accounts", headers=APEX_HEADERS)
+    if sold.status_code == 200:
+        rows = sold.json()
+        match = [r for r in rows if r.get("trader_email") == email]
+        if match:
+            assert match[0]["provider"] == "sp500_dynamic"

@@ -38,7 +38,30 @@ export function useHybridMarkets(
         if (filters.sort) params.set("sort", filters.sort);
 
         const response = await apiFetch<HybridMarketsPayload>(`/api/markets?${params.toString()}`);
-        const markets = limit ? response.markets.slice(0, limit) : response.markets;
+        let markets = response.markets;
+        if (limit && source === "all") {
+          // Interleave sources so S&P 500 / Kalshi are not crowded out by LMSR volume.
+          const order = ["internal", "polymarket", "kalshi", "sp500_dynamic"] as const;
+          const groups = order.map((key) =>
+            response.markets.filter((market) => market.source === key),
+          );
+          const mixed: typeof markets = [];
+          let added = true;
+          while (added && mixed.length < limit) {
+            added = false;
+            for (const group of groups) {
+              const next = group.shift();
+              if (next) {
+                mixed.push(next);
+                added = true;
+                if (mixed.length >= limit) break;
+              }
+            }
+          }
+          markets = mixed;
+        } else if (limit) {
+          markets = response.markets.slice(0, limit);
+        }
         setState({
           status: "success",
           data: { ...response, markets },

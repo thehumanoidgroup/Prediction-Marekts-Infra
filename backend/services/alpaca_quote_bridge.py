@@ -131,11 +131,18 @@ class AlpacaQuoteBridge:
             self._desired = desired
 
             if to_remove:
+                # Unsubscribe both channels in case a prior revision used quotes.
                 await self._stream.unsubscribe(trades=to_remove, quotes=to_remove)
             if to_add:
-                # Prefer trades for last price; also subscribe quotes as mid fallback.
-                await self._stream.subscribe(trades=to_add, quotes=to_add)
-                logger.info("Alpaca IEX subscribed to %s", ",".join(to_add))
+                # Efficient free-tier usage: trades-only for last price.
+                # Quotes double the message volume and burn the 30-symbol budget
+                # faster under fan-out — fall back to REST for thin/after-hours.
+                await self._stream.subscribe(trades=to_add, quotes=[])
+                logger.info(
+                    "Alpaca IEX subscribed trades-only to %s (%s symbols)",
+                    ",".join(to_add),
+                    len(desired),
+                )
 
     async def _reconcile_loop(self) -> None:
         while self._running:
