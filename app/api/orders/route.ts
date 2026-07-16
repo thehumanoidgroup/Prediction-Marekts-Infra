@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHybridMarket } from "@/lib/hybrid-markets";
+import { previewOrderRisk } from "@/lib/provisioning/order-preview";
 import { placeOrder } from "@/services";
 import type { Outcome } from "@/types";
 import { getTenantFromRequest } from "@/lib/tenant-request";
@@ -31,6 +32,25 @@ export async function POST(request: NextRequest) {
     const market = await getHybridMarket(marketId);
     if (!market) {
       return NextResponse.json({ error: `Unknown market: ${marketId}` }, { status: 404 });
+    }
+
+    const quotedYes =
+      typeof yesPrice === "number" && Number.isFinite(yesPrice) ? yesPrice : market.yesPrice;
+
+    // Same challenge risk path for internal / Kalshi / S&P 500 virtual bets.
+    const risk = await previewOrderRisk({
+      tenantId: tenant.id,
+      marketId,
+      outcome: outcome as Outcome,
+      side,
+      shares,
+      yesPrice: quotedYes,
+    });
+    if (!risk.allowed) {
+      return NextResponse.json(
+        { error: risk.reasons[0] ?? risk.violations[0] ?? "Order rejected by risk engine", risk },
+        { status: 422 },
+      );
     }
 
     const result = placeOrder(tenant.id, {

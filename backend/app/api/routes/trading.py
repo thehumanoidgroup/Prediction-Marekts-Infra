@@ -22,7 +22,7 @@ from integrations.polymarket import PolymarketError
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
-MarketListingSource = Literal["internal", "polymarket", "kalshi", "all"]
+MarketListingSource = Literal["internal", "polymarket", "kalshi", "sp500_dynamic", "all"]
 
 
 class PlaceOrderBody(BaseModel):
@@ -56,6 +56,17 @@ def _kalshi_ticker_allowed(session: TraderSession, market_id: str) -> bool:
     return ticker in {t.upper() for t in session.kalshi_market_tickers}
 
 
+def _sp500_ticker_allowed(session: TraderSession, market_id: str) -> bool:
+    """Allowlist by underlying equity ticker embedded in sp500-{TICKER}-… ids."""
+    if not session.sp500_tickers:
+        return True
+    parts = market_id.split("-")
+    if len(parts) < 2 or parts[0].lower() != "sp500":
+        return False
+    ticker = parts[1].upper()
+    return ticker in {t.upper() for t in session.sp500_tickers}
+
+
 async def _refresh_session_external_prices(session: TraderSession) -> None:
     """Refresh cached external quotes for open positions and Kalshi allowlist."""
     market_ids: set[str] = {pos.market_id for pos in session.bankroll.positions()}
@@ -82,10 +93,11 @@ async def list_markets(
     sort: str = Query("volume"),
     source: MarketListingSource = Query(
         "all",
-        description="Market feed: internal LMSR, polymarket, kalshi, or all (hybrid)",
+        description="Market feed: internal, polymarket, kalshi, sp500_dynamic, or all",
     ),
 ) -> dict:
     tickers = session.kalshi_market_tickers if session else None
+    sp500 = session.sp500_tickers if session else None
     try:
         return await list_hybrid_markets(
             category=category,
@@ -93,6 +105,7 @@ async def list_markets(
             sort=sort,
             source=source,
             kalshi_tickers=tickers,
+            sp500_tickers=sp500,
         )
     except (PolymarketError, KalshiError) as exc:
         raise HTTPException(502, detail=str(exc)) from exc
@@ -112,7 +125,7 @@ async def get_portfolio(
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
 ) -> dict:
     store = get_trading_store()
-    if session.provider == "kalshi" or session.external_markets:
+    if session.provider in {"kalshi", "sp500_dynamic"} or session.external_markets:
         await _refresh_session_external_prices(session)
     store.sync_session_risk(session)
     return {
@@ -139,6 +152,14 @@ async def preview_order(
             market = await get_kalshi_service().get_market_by_id(market_id, refresh=True)
             if market is None:
                 raise HTTPException(404, detail="Kalshi market not found")
+            yes_price = float(market.get("yesPrice") or 0.5)
+    elif market_id.lower().startswith("sp500-"):
+        if session.sp500_tickers and not _sp500_ticker_allowed(session, market_id):
+            raise HTTPException(403, detail="S&P 500 ticker not in your allowlist")
+        if yes_price is None:
+            market = await get_hybrid_market(market_id)
+            if market is None:
+                raise HTTPException(404, detail="S&P 500 market not found")
             yes_price = float(market.get("yesPrice") or 0.5)
 
     preview = store.preview_order_risk(
@@ -180,6 +201,36 @@ async def place_order(
                 yes_price=float(market.get("yesPrice") or 0.5),
                 category=str(market.get("category") or "economics"),
             )
+        elif market_id.lower().startswith("sp500-"):
+            if session.sp500_tickers and not _sp500_ticker_allowed(session, market_id):
+                raise HTTPException(403, detail="S&P 500 ticker not in your allowlist")
+
+            market = await get_hybrid_market(market_id)
+            if market is None:
+                raise HTTPException(404, detail="S&P 500 market not found")
+
+            # Prefer internal LMSR fill when the market lives in the store;
+            # otherwise virtual-fill at the quoted LMSR/seed price.
+            runtime = store.get_market(market_id)
+            if runtime is not None:
+                result = store.place_order(
+                    session,
+                    market_id=market_id,
+                    outcome=body.outcome,
+                    side=body.side,
+                    shares=body.shares,
+                )
+            else:
+                result = store.place_external_order(
+                    session,
+                    market_id=market_id,
+                    market_question=str(market.get("question") or market_id),
+                    outcome=body.outcome,
+                    side=body.side,
+                    shares=body.shares,
+                    yes_price=float(market.get("yesPrice") or 0.5),
+                    category=str(market.get("category") or "stocks"),
+                )
         else:
             result = store.place_order(
                 session,

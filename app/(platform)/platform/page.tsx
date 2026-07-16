@@ -5,18 +5,21 @@ import {
   getPlatformStats,
   listFirmOverviews,
 } from "@/lib/services";
+import { getSp500TickerAnalytics } from "@/lib/sp500/analytics";
 import { formatCompactUsd, formatPct } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
 import { ActivityFeed } from "@/components/platform/activity-feed";
 import { FirmsTable } from "@/components/platform/firms-table";
 import { PlatformAnalytics } from "@/components/platform/platform-analytics";
+import { Sp500Analytics } from "@/components/platform/sp500-analytics";
 
 export default async function PlatformOverviewPage() {
   const stats = getPlatformStats();
   const firms = listFirmOverviews();
   const analytics = getPlatformAnalytics();
   const activity = await getPlatformActivity();
+  const sp500Tickers = getSp500TickerAnalytics(8);
 
   const kpis: Stat[] = [
     {
@@ -49,6 +52,7 @@ export default async function PlatformOverviewPage() {
     <div className="flex flex-col gap-4">
       <StatCards stats={kpis} />
       <PlatformAnalytics data={analytics} />
+      <Sp500Analytics tickers={sp500Tickers} />
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader

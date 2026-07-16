@@ -119,6 +119,7 @@ async def get_trader_session(
         program,
         provider=demo_account.provider.value,
         kalshi_market_tickers=demo_account.effective_kalshi_tickers(),
+        sp500_tickers=demo_account.effective_sp500_tickers(),
         demo_account_id=demo_account.id,
     )
 

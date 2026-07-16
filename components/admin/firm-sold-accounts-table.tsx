@@ -72,7 +72,17 @@ export function FirmSoldAccountsTable({ refreshKey }: { refreshKey?: number }) {
                 <div className="text-xs text-faint">{row.trader_email}</div>
               </td>
               <td className="py-3 pr-4">
-                <Badge tone={row.provider === "kalshi" ? "accent" : "up"}>{row.provider}</Badge>
+                <Badge
+                  tone={
+                    row.provider === "kalshi"
+                      ? "accent"
+                      : row.provider === "sp500_dynamic"
+                        ? "warn"
+                        : "up"
+                  }
+                >
+                  {row.provider === "sp500_dynamic" ? "S&P 500" : row.provider}
+                </Badge>
               </td>
               <td className="py-3 pr-4">
                 <Badge tone="accent">{row.model_type}</Badge>

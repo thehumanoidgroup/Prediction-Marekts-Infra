@@ -82,6 +82,7 @@ class TraderSession:
     risk: RiskEngine
     provider: str = "internal"
     kalshi_market_tickers: list[str] = field(default_factory=list)
+    sp500_tickers: list[str] = field(default_factory=list)
     demo_account_id: str | None = None
     external_markets: dict[str, dict] = field(default_factory=dict)
     journal: list[JournalRecord] = field(default_factory=list)
@@ -236,6 +237,7 @@ class TradingStore:
         *,
         provider: str = "internal",
         kalshi_market_tickers: list[str] | None = None,
+        sp500_tickers: list[str] | None = None,
         demo_account_id: str | None = None,
     ) -> TraderSession:
         key = (tenant_slug, user_id)
@@ -267,6 +269,7 @@ class TradingStore:
                 risk=risk,
                 provider=provider,
                 kalshi_market_tickers=list(kalshi_market_tickers or []),
+                sp500_tickers=list(sp500_tickers or []),
                 demo_account_id=demo_account_id,
                 day_open_equity=starting,
             )
@@ -288,6 +291,7 @@ class TradingStore:
         *,
         provider: str = "internal",
         kalshi_market_tickers: list[str] | None = None,
+        sp500_tickers: list[str] | None = None,
         demo_account_id: str | None = None,
     ) -> TraderSession:
         """Replace an existing in-memory session (e.g. after re-provisioning)."""
@@ -300,6 +304,7 @@ class TradingStore:
             program,
             provider=provider,
             kalshi_market_tickers=kalshi_market_tickers,
+            sp500_tickers=sp500_tickers,
             demo_account_id=demo_account_id,
         )
 
@@ -407,7 +412,16 @@ class TradingStore:
         yes_price: float | None = None,
     ) -> float:
         outcome_idx = 0 if outcome == "yes" else 1
-        if market_id.lower().startswith("kalshi-") or market_id in session.external_markets:
+        external_priced = (
+            market_id.lower().startswith("kalshi-")
+            or market_id.lower().startswith("sp500-")
+            or market_id in session.external_markets
+        )
+        if external_priced and (
+            market_id.lower().startswith("kalshi-")
+            or market_id in session.external_markets
+            or self.get_market(market_id) is None
+        ):
             clamped = _clamp_price(float(yes_price if yes_price is not None else 0.5))
             fill_price = clamped if outcome_idx == 0 else (1.0 - clamped)
             gross = fill_price * shares
@@ -702,7 +716,13 @@ class TradingStore:
                 "question": market_question,
                 "category": category,
                 "yesPrice": yes_price,
-                "source": "kalshi" if market_id.startswith("kalshi-") else "external",
+                "source": (
+                    "kalshi"
+                    if market_id.startswith("kalshi-")
+                    else "sp500_dynamic"
+                    if market_id.startswith("sp500-")
+                    else "external"
+                ),
             }
 
             prices = self.market_prices_for_session(session)
@@ -724,7 +744,13 @@ class TradingStore:
                     price=fill_price,
                     pnl=None,
                     note="",
-                    tags=["kalshi"] if market_id.startswith("kalshi-") else ["external"],
+                    tags=(
+                        ["kalshi"]
+                        if market_id.startswith("kalshi-")
+                        else ["sp500_dynamic"]
+                        if market_id.startswith("sp500-")
+                        else ["external"]
+                    ),
                     executed_at=now_ms(),
                 ),
             )

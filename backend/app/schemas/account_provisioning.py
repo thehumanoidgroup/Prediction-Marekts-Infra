@@ -134,6 +134,8 @@ class ProvisionAccountResponse(BaseModel):
     credentials_generated: bool
     kalshi_live_integration_enabled: bool
     kalshi_market_tickers: list[str]
+    sp500_dynamic_enabled: bool = False
+    sp500_tickers: list[str] = Field(default_factory=list)
     temporary_password: str | None = None
     applied_rules: ChallengeRulesPreview
 
@@ -156,6 +158,7 @@ class SoldAccountOut(BaseModel):
     trader_display_name: str
     external_order_id: str | None
     kalshi_market_tickers: list[str] | None
+    sp500_tickers: list[str] | None = None
     credentials_generated: bool
     email_sent: bool
     issued_by_user_id: str | None

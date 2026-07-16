@@ -90,6 +90,7 @@ class ProvisionResult:
     temporary_password: str | None
     email_sent: bool
     kalshi_market_tickers: list[str]
+    sp500_tickers: list[str]
     applied_rules: dict[str, Any]
 
 
@@ -1064,12 +1065,17 @@ async def provision_new_account(
     from app.core.config import get_settings
     from app.runtime.store import get_trading_store
 
+    sp500_tickers = account.effective_sp500_tickers()
+    if resolved_provider is MarketProvider.SP500_DYNAMIC and not sp500_tickers:
+        sp500_tickers = list(DEFAULT_SP500_TICKERS)
+
     get_trading_store().reset_session(
         tenant.slug,
         str(user.id),
         account.to_program_dict(),
         provider=account.provider.value,
         kalshi_market_tickers=account.effective_kalshi_tickers(),
+        sp500_tickers=sp500_tickers,
         demo_account_id=account.id,
     )
 
@@ -1089,6 +1095,12 @@ async def provision_new_account(
             )
         )
 
+    sold_meta: dict[str, Any] = dict(metadata or {})
+    if sp500_tickers:
+        sold_meta["sp500_tickers"] = list(sp500_tickers)
+    if resolved_provider is MarketProvider.SP500_DYNAMIC:
+        sold_meta["sp500_dynamic_enabled"] = True
+
     sold_record = await _log_sold_account(
         db,
         tenant=tenant,
@@ -1103,7 +1115,7 @@ async def provision_new_account(
         email_sent=email_sent,
         issued_by_user_id=issued_by_user_id,
         external_order_id=external_order_id,
-        metadata=metadata,
+        metadata=sold_meta or None,
     )
 
     return ProvisionResult(
@@ -1114,6 +1126,7 @@ async def provision_new_account(
         temporary_password=temporary_password,
         email_sent=email_sent,
         kalshi_market_tickers=account.effective_kalshi_tickers(),
+        sp500_tickers=sp500_tickers,
         applied_rules=applied_rules,
     )
 
