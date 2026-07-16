@@ -9,6 +9,7 @@ const options: { id: MarketViewSource; label: string; description: string }[] = 
   { id: "internal", label: "Internal", description: "PropPredict LMSR" },
   { id: "polymarket", label: "Polymarket", description: "Live CLOB feed" },
   { id: "kalshi", label: "Kalshi", description: "Live Kalshi feed" },
+  { id: "sp500_dynamic", label: "S&P 500", description: "Dynamic stock markets" },
 ];
 
 /** Segmented control for internal, Polymarket, or hybrid market listings. */
@@ -76,6 +77,14 @@ export function MarketSourceToggle({
 export function useMarketSource(): MarketViewSource {
   const searchParams = useSearchParams();
   const raw = searchParams.get("source") as MarketViewSource | null;
-  if (raw === "internal" || raw === "polymarket" || raw === "kalshi") return raw;
+  if (
+    raw === "internal" ||
+    raw === "polymarket" ||
+    raw === "kalshi" ||
+    raw === "sp500_dynamic" ||
+    raw === "external"
+  ) {
+    return raw;
+  }
   return "all";
 }

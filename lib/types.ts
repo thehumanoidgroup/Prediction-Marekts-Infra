@@ -13,10 +13,18 @@ export type MarketCategory =
 export type MarketStatus = "open" | "closing_soon" | "resolved";
 
 /** Where a market's liquidity and pricing originate. */
-export type MarketSourceType = "internal" | "polymarket" | "kalshi" | "external";
+export type MarketSourceType =
+  | "internal"
+  | "polymarket"
+  | "kalshi"
+  | "sp500_dynamic"
+  | "external";
 
 /** Trader UI filter for which market feeds to display. */
 export type MarketViewSource = MarketSourceType | "all";
+
+/** Expiration style for S&P 500 dynamic stock prediction markets. */
+export type StockExpirationType = "0dte" | "weekly";
 
 export type Outcome = "yes" | "no";
 
@@ -47,12 +55,17 @@ export interface Market {
   closesAt: number;
   resolvedOutcome?: Outcome;
   history: PricePoint[];
-  /** Liquidity source — internal LMSR simulator or external Polymarket CLOB. */
+  /** Liquidity source — internal LMSR, Polymarket, Kalshi, or S&P 500 dynamic. */
   source: MarketSourceType;
   externalConditionId?: string;
   marketSlug?: string | null;
   acceptingOrders?: boolean;
   outcomes?: PolymarketOutcome[];
+  /** S&P 500 dynamic stock market fields (null/undefined for other providers). */
+  stockTicker?: string;
+  strikePrice?: number;
+  expirationType?: StockExpirationType;
+  expirationDate?: string;
 }
 
 export interface PolymarketOutcome {
@@ -72,14 +85,24 @@ export type KalshiMarket = Market & {
   externalTicker: string;
 };
 
+export type Sp500DynamicMarket = Market & {
+  source: "sp500_dynamic";
+  stockTicker: string;
+  strikePrice: number;
+  expirationType: StockExpirationType;
+  expirationDate: string;
+};
+
 export type LiveEventSource = MarketSourceType;
 export type LiveEventStatus = MarketStatus;
 
-/** Unified live event from internal LMSR or Polymarket feeds. */
+/** Unified live event from internal LMSR or external provider feeds. */
 export interface LiveEvent {
   id: string;
   externalId: string;
   source: LiveEventSource;
+  /** Alias of ``source`` for account-style multi-provider APIs. */
+  provider?: LiveEventSource;
   category: MarketCategory;
   status: LiveEventStatus;
   question: string;
@@ -89,19 +112,35 @@ export interface LiveEvent {
   volume24h: number;
   change24h: number;
   lastUpdated: string;
+  /** S&P 500 dynamic fields — null for other providers. */
+  stockTicker?: string | null;
+  strikePrice?: number | null;
+  expirationType?: StockExpirationType | null;
+  expirationDate?: string | null;
 }
 
 export interface LiveEventsPayload {
   events: LiveEvent[];
   count: number;
-  counts: { internal: number; polymarket: number; kalshi: number };
+  counts: {
+    internal: number;
+    polymarket: number;
+    kalshi: number;
+    sp500_dynamic?: number;
+    external?: number;
+  };
   source: MarketViewSource;
 }
 
 export interface HybridMarketsPayload {
   markets: Market[];
   source: MarketViewSource;
-  counts: { internal: number; polymarket: number; kalshi: number };
+  counts: {
+    internal: number;
+    polymarket: number;
+    kalshi: number;
+    sp500_dynamic?: number;
+  };
 }
 
 export interface PolymarketIntegrationStatus {
@@ -199,8 +238,14 @@ export interface ChallengeAccount {
   label: string;
   phase: ChallengePhase;
   challengeStatus?: "active" | "passed" | "failed";
-  provider?: "internal" | "polymarket" | "kalshi";
+  provider?: "internal" | "polymarket" | "kalshi" | "sp500_dynamic";
   kalshiMarketTickers?: string[];
+  /** S&P 500 dynamic stock market fields (when provider = sp500_dynamic). */
+  stockTicker?: string | null;
+  strikePrice?: number | null;
+  expirationType?: StockExpirationType | null;
+  expirationDate?: string | null;
+  sp500Tickers?: string[];
   startingBalance: number;
   balance: number;
   equity: number;

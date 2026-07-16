@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const PROVIDERS = ["internal", "kalshi", "polymarket"] as const;
+const PROVIDERS = ["internal", "kalshi", "polymarket", "sp500_dynamic"] as const;
 
 /** Firm admin form to manually issue an evaluation account. */
 export function ProvisionAccountForm() {

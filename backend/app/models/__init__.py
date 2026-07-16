@@ -5,6 +5,7 @@ from app.models.account import (
     MarketProvider,
     PropFirmAccount,
     SoldAccount,
+    StockExpirationType,
     TraderDemoAccount,
 )
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
@@ -22,6 +23,7 @@ __all__ = [
     "MarketProvider",
     "PropFirmAccount",
     "SoldAccount",
+    "StockExpirationType",
     "Tenant",
     "TraderDemoAccount",
     "User",

@@ -14,12 +14,22 @@ interface BackendLiveEvent {
   volume_24h: number;
   change_24h: number;
   last_updated: string;
+  stock_ticker?: string | null;
+  strike_price?: number | null;
+  expiration_type?: LiveEvent["expirationType"];
+  expiration_date?: string | null;
 }
 
 interface BackendLiveEventsPayload {
   events: BackendLiveEvent[];
   count: number;
-  counts?: { internal: number; polymarket: number; kalshi: number };
+  counts?: {
+    internal: number;
+    polymarket: number;
+    kalshi: number;
+    sp500_dynamic?: number;
+    external?: number;
+  };
   source?: MarketViewSource;
 }
 
@@ -33,6 +43,7 @@ export function mapLiveEvent(raw: BackendLiveEvent): LiveEvent {
     id: raw.id,
     externalId: raw.external_id,
     source: raw.source,
+    provider: raw.source,
     category: raw.category,
     status: raw.status,
     question: raw.question,
@@ -42,6 +53,10 @@ export function mapLiveEvent(raw: BackendLiveEvent): LiveEvent {
     volume24h: raw.volume_24h,
     change24h: raw.change_24h,
     lastUpdated: raw.last_updated,
+    stockTicker: raw.stock_ticker ?? null,
+    strikePrice: raw.strike_price ?? null,
+    expirationType: raw.expiration_type ?? null,
+    expirationDate: raw.expiration_date ?? null,
   };
 }
 
@@ -54,6 +69,7 @@ export function mapLiveEventsPayload(raw: BackendLiveEventsPayload): LiveEventsP
       internal: events.filter((event) => event.source === "internal").length,
       polymarket: events.filter((event) => event.source === "polymarket").length,
       kalshi: events.filter((event) => event.source === "kalshi").length,
+      sp500_dynamic: events.filter((event) => event.source === "sp500_dynamic").length,
     },
     source: raw.source ?? "all",
   };
@@ -77,6 +93,10 @@ export function liveEventToMarket(event: LiveEvent): Market {
     externalConditionId:
       event.source === "polymarket" ? event.externalId.replace(/^poly-/, "") : undefined,
     acceptingOrders: event.status !== "resolved",
+    stockTicker: event.stockTicker ?? undefined,
+    strikePrice: event.strikePrice ?? undefined,
+    expirationType: event.expirationType ?? undefined,
+    expirationDate: event.expirationDate ?? undefined,
   };
 }
 
@@ -93,6 +113,10 @@ function marketToLiveEvent(market: Market): LiveEvent {
     volume_24h: market.volume24h || market.volume || 0,
     change_24h: market.change24h,
     last_updated: new Date().toISOString(),
+    stock_ticker: market.stockTicker,
+    strike_price: market.strikePrice,
+    expiration_type: market.expirationType,
+    expiration_date: market.expirationDate,
   });
 }
 
@@ -136,6 +160,7 @@ function buildPayload(markets: Market[], source: MarketViewSource): LiveEventsPa
       internal: events.filter((event) => event.source === "internal").length,
       polymarket: events.filter((event) => event.source === "polymarket").length,
       kalshi: events.filter((event) => event.source === "kalshi").length,
+      sp500_dynamic: events.filter((event) => event.source === "sp500_dynamic").length,
     },
     source,
   };

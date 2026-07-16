@@ -94,6 +94,7 @@ export async function listHybridMarkets(
     internal: markets.filter((market) => market.source === "internal").length,
     polymarket: markets.filter((market) => market.source === "polymarket").length,
     kalshi: markets.filter((market) => market.source === "kalshi").length,
+    sp500_dynamic: markets.filter((market) => market.source === "sp500_dynamic").length,
   };
 
   return { markets, source, counts };

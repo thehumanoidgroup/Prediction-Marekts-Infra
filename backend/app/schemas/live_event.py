@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -33,13 +33,29 @@ class LiveEventResponse(BaseModel):
     volume_24h: float
     change_24h: float
     last_updated: datetime
+    # S&P 500 dynamic fields (null for internal / polymarket / kalshi / external).
+    stock_ticker: str | None = None
+    strike_price: float | None = None
+    expiration_type: str | None = None
+    expiration_date: datetime | date | str | None = None
+
+    @property
+    def provider(self) -> str:
+        """Alias of ``source`` for account-style multi-provider APIs."""
+        return self.source
 
 
 class LiveEventListResponse(BaseModel):
     events: list[LiveEventResponse]
     count: int
     counts: dict[str, int] = Field(
-        default_factory=lambda: {"internal": 0, "polymarket": 0, "kalshi": 0, "external": 0},
+        default_factory=lambda: {
+            "internal": 0,
+            "polymarket": 0,
+            "kalshi": 0,
+            "sp500_dynamic": 0,
+            "external": 0,
+        },
         description="Event counts by source in the current result set",
     )
     source: str = Field(default="all", description="Applied source filter")

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import enum
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    Date,
     Enum,
     Float,
     ForeignKey,
@@ -23,11 +25,23 @@ from app.models.base import Base, UUIDTimestampMixin
 
 
 class MarketProvider(str, enum.Enum):
-    """Liquidity / market data provider for a challenge account."""
+    """Liquidity / market data provider for a challenge account.
+
+    Multi-provider compatibility: ``internal`` | ``polymarket`` | ``kalshi`` |
+    ``sp500_dynamic`` (Alpaca IEX S&P 500 stock prediction markets).
+    """
 
     INTERNAL = "internal"
     POLYMARKET = "polymarket"
     KALSHI = "kalshi"
+    SP500_DYNAMIC = "sp500_dynamic"
+
+
+class StockExpirationType(str, enum.Enum):
+    """Expiration style for S&P 500 dynamic stock prediction markets."""
+
+    ZERO_DTE = "0dte"
+    WEEKLY = "weekly"
 
 
 class ChallengeConfig(Base, UUIDTimestampMixin):
@@ -71,6 +85,15 @@ class ChallengeConfig(Base, UUIDTimestampMixin):
     # Provider-specific market allowlists (optional).
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     polymarket_condition_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # S&P 500 dynamic (Alpaca IEX) — optional allowlist + default market params.
+    sp500_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    stock_ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    strike_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expiration_type: Mapped[StockExpirationType | None] = mapped_column(
+        Enum(StockExpirationType, values_callable=lambda e: [m.value for m in e]),
+        nullable=True,
+    )
+    expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     tenant = relationship("Tenant", back_populates="challenge_configs")
     prop_firm_accounts = relationship("PropFirmAccount", back_populates="challenge_config")
@@ -106,6 +129,14 @@ class PropFirmAccount(Base, UUIDTimestampMixin):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # S&P 500 dynamic stock prediction markets (nullable for other providers).
+    stock_ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    strike_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expiration_type: Mapped[StockExpirationType | None] = mapped_column(
+        Enum(StockExpirationType, values_callable=lambda e: [m.value for m in e]),
+        nullable=True,
+    )
+    expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     tenant = relationship("Tenant", back_populates="prop_firm_accounts")
     challenge_config = relationship("ChallengeConfig", back_populates="prop_firm_accounts")
@@ -196,6 +227,14 @@ class TraderDemoAccount(Base, UUIDTimestampMixin):
     virtual_balance: Mapped[float] = mapped_column(Float, nullable=False)
     model_type: Mapped[str] = mapped_column(String(64), default="evaluation", nullable=False)
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # S&P 500 dynamic stock prediction markets (nullable for other providers).
+    stock_ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    strike_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expiration_type: Mapped[StockExpirationType | None] = mapped_column(
+        Enum(StockExpirationType, values_callable=lambda e: [m.value for m in e]),
+        nullable=True,
+    )
+    expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     tenant = relationship("Tenant", back_populates="trader_demo_accounts")
     user = relationship("User", back_populates="demo_account")
@@ -212,6 +251,46 @@ class TraderDemoAccount(Base, UUIDTimestampMixin):
         if self.challenge_config and self.challenge_config.kalshi_market_tickers:
             return list(self.challenge_config.kalshi_market_tickers)
         return []
+
+    def effective_sp500_tickers(self) -> list[str]:
+        """Resolved S&P 500 ticker allowlist (single ticker → config list)."""
+        if self.stock_ticker:
+            return [self.stock_ticker.upper()]
+        if self.prop_firm_account and self.prop_firm_account.stock_ticker:
+            return [self.prop_firm_account.stock_ticker.upper()]
+        if self.challenge_config and self.challenge_config.sp500_tickers:
+            return [str(t).upper() for t in self.challenge_config.sp500_tickers]
+        if self.challenge_config and self.challenge_config.stock_ticker:
+            return [self.challenge_config.stock_ticker.upper()]
+        return []
+
+    def effective_stock_market(self) -> dict[str, Any] | None:
+        """Resolved stock market params for ``sp500_dynamic`` accounts."""
+        if self.provider is not MarketProvider.SP500_DYNAMIC:
+            return None
+        ticker = self.stock_ticker
+        strike = self.strike_price
+        exp_type = self.expiration_type
+        exp_date = self.expiration_date
+        if self.prop_firm_account:
+            ticker = ticker or self.prop_firm_account.stock_ticker
+            strike = strike if strike is not None else self.prop_firm_account.strike_price
+            exp_type = exp_type or self.prop_firm_account.expiration_type
+            exp_date = exp_date or self.prop_firm_account.expiration_date
+        if self.challenge_config:
+            ticker = ticker or self.challenge_config.stock_ticker
+            strike = strike if strike is not None else self.challenge_config.strike_price
+            exp_type = exp_type or self.challenge_config.expiration_type
+            exp_date = exp_date or self.challenge_config.expiration_date
+        if not ticker:
+            return None
+        return {
+            "provider": MarketProvider.SP500_DYNAMIC.value,
+            "stock_ticker": ticker.upper(),
+            "strike_price": float(strike) if strike is not None else None,
+            "expiration_type": exp_type.value if exp_type is not None else None,
+            "expiration_date": exp_date.isoformat() if isinstance(exp_date, date) else exp_date,
+        }
 
     def scaled_stake_limits(self) -> dict[str, float | None]:
         """Scale absolute stake caps relative to the config template balance."""
@@ -253,4 +332,6 @@ class TraderDemoAccount(Base, UUIDTimestampMixin):
             "min_consistency_score": cfg.min_consistency_score,
             "provider": self.provider.value,
             "kalshi_market_tickers": self.effective_kalshi_tickers(),
+            "sp500_tickers": self.effective_sp500_tickers(),
+            "stock_market": self.effective_stock_market(),
         }

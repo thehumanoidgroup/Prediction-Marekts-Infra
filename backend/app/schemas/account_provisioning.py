@@ -6,8 +6,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-ProviderName = Literal["internal", "polymarket", "kalshi"]
+ProviderName = Literal["internal", "polymarket", "kalshi", "sp500_dynamic"]
 ModelType = Literal["1step", "2step", "3step", "instant", "evaluation"]
+StockExpirationName = Literal["0dte", "weekly"]
 
 
 class ChallengeRulesInput(BaseModel):
@@ -77,6 +78,13 @@ class ProvisionAccountRequest(BaseModel):
     challenge_rules: ChallengeRulesInput | None = None
     prop_firm_account_slug: str | None = None
     kalshi_categories: list[str] | None = None
+    # S&P 500 dynamic (optional — only used when provider=sp500_dynamic).
+    stock_ticker: str | None = Field(None, max_length=16)
+    strike_price: float | None = Field(None, gt=0)
+    expiration_type: StockExpirationName | None = None
+    expiration_date: str | None = Field(
+        None, description="ISO date YYYY-MM-DD for stock market resolution"
+    )
     send_credentials_email: bool = True
     replace_existing: bool = True
 
