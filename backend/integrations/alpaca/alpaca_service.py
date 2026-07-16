@@ -1,9 +1,15 @@
 """Cached Alpaca S&P 500 market-data service (Redis + in-process fallback).
 
+Official docs
+-------------
+- https://alpaca.markets/docs/
+- https://alpaca.markets/docs/api-references/market-data-api/
+
 Wraps :class:`AlpacaClient` with TTLs suitable for the free IEX tier.
 
-Replace with Polygon.io client when scaling — keep this façade's method names
-stable so PropPredict market/resolution code can swap providers behind env flags.
+Polygon.io will replace Alpaca when scaling many accounts — keep this façade's
+method names stable so PropPredict market/resolution code can swap providers
+behind env flags.
 """
 
 from __future__ import annotations

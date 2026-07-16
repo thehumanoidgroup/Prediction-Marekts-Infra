@@ -13,6 +13,7 @@ Market ids are deterministic (``sp500-{TICKER}-{exp}-{YYYY-MM-DD}-{strike}``)
 so re-runs are idempotent — existing LMSR + DB rows are left untouched.
 
 Official market-data docs (until Polygon swap):
+- https://alpaca.markets/docs/
 - https://alpaca.markets/docs/api-references/market-data-api/
 """
 

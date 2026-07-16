@@ -177,6 +177,26 @@ export interface KalshiIntegrationStatus {
   error: string | null;
 }
 
+export interface AlpacaIntegrationStatus {
+  provider: "alpaca";
+  enabled: boolean;
+  healthy: boolean;
+  /** Market Data REST root (includes /v2). */
+  baseUrl: string;
+  feed: string;
+  authMode: "authenticated" | "unconfigured";
+  hasApiCredentials: boolean;
+  /** Live snapshot probe vs mock-spot fallback. */
+  api: "connected" | "error" | "unconfigured" | "mock" | string;
+  sampleTicker: string | null;
+  samplePrice: number | null;
+  latencyMs: number | null;
+  sp500TickerCount: number;
+  error: string | null;
+  /** Scaling reminder for operators. */
+  scalingNote: string;
+}
+
 export interface Position {
   id: string;
   marketId: string;
