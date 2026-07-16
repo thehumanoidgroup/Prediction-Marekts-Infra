@@ -39,6 +39,9 @@ def serialize_market(m: MarketRuntime) -> dict:
         "source": m.source or "internal",
         "provider": m.source or "internal",
     }
+    if m.resolved_outcome:
+        payload["status"] = "resolved"
+        payload["resolvedOutcome"] = m.resolved_outcome
     if m.stock_ticker:
         payload["stockTicker"] = m.stock_ticker
     if m.strike_price is not None:

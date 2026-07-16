@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     # Run shortly after the loop starts when True (useful in development).
     sp500_generator_run_on_startup: bool = False
 
+    # S&P 500 EOD resolution (Alpaca daily bars → LMSR settlement).
+    sp500_resolution_enabled: bool = True
+    # 0 = sleep until next 16:15 ET window; >0 = fixed poll interval (seconds).
+    sp500_resolution_interval_seconds: float = 0.0
+    sp500_resolution_hour_et: int = 16
+    sp500_resolution_minute_et: int = 15
+    sp500_resolution_max_retries: int = 3
+    sp500_resolution_retry_backoff_seconds: float = 30.0
+    sp500_resolution_run_on_startup: bool = False
+
     # Account provisioning
     provisioning_email_enabled: bool = True
     webhook_secret: str | None = None

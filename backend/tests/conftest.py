@@ -4,6 +4,8 @@ import asyncio
 import os
 
 os.environ.setdefault("PP_INGESTION_ENABLED", "false")
+os.environ.setdefault("PP_SP500_GENERATOR_ENABLED", "false")
+os.environ.setdefault("PP_SP500_RESOLUTION_ENABLED", "false")
 os.environ["PP_DATABASE_URL"] = "sqlite+aiosqlite:///./test_pp.db"
 
 import pytest

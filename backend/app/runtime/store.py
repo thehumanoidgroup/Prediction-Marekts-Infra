@@ -57,9 +57,14 @@ class MarketRuntime:
     strike_price: float | None = None
     expiration_type: str | None = None
     expiration_date: str | None = None
+    resolved_outcome: str | None = None  # "yes" | "no" once settled
 
     @property
     def yes_price(self) -> float:
+        if self.resolved_outcome == "yes":
+            return 0.97
+        if self.resolved_outcome == "no":
+            return 0.03
         return _clamp_price(self.maker.prices()[0])
 
     def append_history(self, ts: int | None = None) -> None:
@@ -325,6 +330,63 @@ class TradingStore:
     def get_market(self, market_id: str) -> MarketRuntime | None:
         with self._lock:
             return self._markets.get(market_id)
+
+    def iter_sessions(self) -> list[TraderSession]:
+        with self._lock:
+            return list(self._sessions.values())
+
+    def settle_market_all_sessions(
+        self,
+        market_id: str,
+        winning_outcome: int,
+    ) -> list[tuple[tuple[str, str], list]]:
+        """Pay out every trader session holding the market via VirtualBankroll.settle_market.
+
+        ``winning_outcome``: ``0`` = Yes, ``1`` = No.
+        Returns ``[((tenant_slug, user_id), ledger_entries), ...]``.
+        """
+        outcome_label = "yes" if winning_outcome == 0 else "no"
+        settled: list[tuple[tuple[str, str], list]] = []
+        market_question = market_id
+
+        with self._lock:
+            market = self._markets.get(market_id)
+            if market is not None:
+                market.resolved_outcome = outcome_label
+                # Force serializer status to resolved.
+                market.closes_at = min(market.closes_at or now_ms(), now_ms())
+                market_question = market.question
+
+            sessions = list(self._sessions.values())
+
+        for session in sessions:
+            with session._lock:
+                entries = session.bankroll.settle_market(market_id, winning_outcome)
+                if not entries:
+                    continue
+                prices = self.market_prices_for_session(session)
+                snap = session.bankroll.mark_to_market(prices)
+                session.risk.on_equity(snap.equity, traded=True)
+                session.record_equity(prices)
+                session.journal.append(
+                    JournalRecord(
+                        id=str(uuid.uuid4()),
+                        kind="trade",
+                        market_id=market_id,
+                        market_question=market_question,
+                        outcome=outcome_label,
+                        side=None,
+                        shares=None,
+                        price=1.0 if winning_outcome == 0 else 0.0,
+                        pnl=sum(float(e.amount) for e in entries),
+                        note=f"Market resolved {outcome_label.upper()}",
+                        tags=["settlement", "sp500_dynamic"],
+                        executed_at=now_ms(),
+                    )
+                )
+                settled.append(((session.tenant_slug, session.user_id), entries))
+
+        return settled
 
     def sync_session_risk(self, session: TraderSession) -> list:
         """Re-mark open positions and run real-time drawdown / daily-loss checks."""

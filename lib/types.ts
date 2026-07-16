@@ -341,6 +341,7 @@ export type PlatformActivityType =
   | "trader_passed"
   | "trader_failed"
   | "market_created"
+  | "market_resolved"
   | "volume_milestone"
   | "risk_alert"
   | "account_provisioned"
