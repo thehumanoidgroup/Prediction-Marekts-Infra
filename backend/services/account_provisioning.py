@@ -38,7 +38,7 @@ from services.email_service import AccountCredentialsEmail, send_account_credent
 
 logger = logging.getLogger(__name__)
 
-ProviderName = Literal["internal", "polymarket", "kalshi"]
+ProviderName = Literal["internal", "polymarket", "kalshi", "sp500_dynamic"]
 
 DEFAULT_KALSHI_TICKERS = [
     "KXBTC-25DEC31",
@@ -46,6 +46,30 @@ DEFAULT_KALSHI_TICKERS = [
 ]
 
 DEFAULT_KALSHI_CATEGORIES = ("crypto", "economics", "stocks")
+
+# Liquid S&P 500 universe linked to newly issued sp500_dynamic evaluation accounts.
+DEFAULT_SP500_TICKERS = (
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "TSLA",
+    "JPM",
+    "V",
+    "UNH",
+    "XOM",
+    "JNJ",
+    "WMT",
+    "MA",
+    "PG",
+    "HD",
+    "BAC",
+    "AMD",
+    "COST",
+    "NFLX",
+)
 
 _KALSHI_CATEGORY_PATTERNS: dict[str, re.Pattern[str]] = {
     "crypto": re.compile(r"\b(btc|bitcoin|eth|ethereum|crypto|solana|xrp)\b", re.I),
@@ -96,6 +120,8 @@ async def _load_template_config(
 ) -> ChallengeConfig | None:
     if not template_config_id:
         return None
+    if template_config_id.startswith("sp500-"):
+        return None
     result = await db.execute(
         select(ChallengeConfig).where(
             ChallengeConfig.id == template_config_id,
@@ -103,6 +129,42 @@ async def _load_template_config(
         )
     )
     return result.scalar_one_or_none()
+
+
+def _builtin_template_overrides(template_config_id: str | None) -> dict[str, Any] | None:
+    if not template_config_id or not template_config_id.startswith("sp500-"):
+        return None
+    for built_in in _sp500_stock_event_templates():
+        if built_in["id"] == template_config_id:
+            rules = built_in["rules"]
+            return {
+                "profit_target_pct": rules["profit_target_pct"],
+                "max_daily_loss_pct": rules["max_daily_loss_pct"],
+                "max_drawdown_pct": rules["max_drawdown_pct"],
+                "drawdown_mode": rules["drawdown_mode"],
+                "max_stake_per_order": rules.get("max_stake_per_order"),
+                "max_exposure_per_market": rules.get("max_exposure_per_market"),
+                "max_total_exposure": rules.get("max_total_exposure"),
+                "min_consistency_score": rules.get("min_consistency_score"),
+                "min_trading_days": rules["min_trading_days"],
+                "challenge_duration_days": rules["challenge_duration_days"],
+                "profit_split_pct": rules["profit_split_pct"],
+                "provider": MarketProvider.SP500_DYNAMIC.value,
+                "model_type": rules["model_type"],
+                "starting_balance": rules["account_size"],
+            }
+    return None
+
+
+def _merge_challenge_overrides(
+    challenge_rules: dict[str, Any] | None,
+    template_config_id: str | None,
+) -> dict[str, Any] | None:
+    builtin = _builtin_template_overrides(template_config_id)
+    if not builtin and not challenge_rules:
+        return challenge_rules
+    merged = {**(builtin or {}), **(challenge_rules or {})}
+    return merged or None
 
 
 async def preview_issuance_rules(
@@ -129,7 +191,10 @@ async def preview_issuance_rules(
         product = await get_default_prop_firm_account(db, tenant.id)
     if product is None:
         product = await ensure_tenant_account_catalog(
-            db, tenant, include_kalshi=provider is MarketProvider.KALSHI
+            db,
+            tenant,
+            include_kalshi=provider is MarketProvider.KALSHI,
+            include_sp500=provider is MarketProvider.SP500_DYNAMIC,
         )
 
     loaded = await db.execute(
@@ -147,7 +212,7 @@ async def preview_issuance_rules(
         base=base,
         model_type=model_type,
         account_size=float(account_size),
-        overrides=challenge_rules,
+        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
     )
     return _rules_to_preview(resolved, model_type=model_type, account_size=float(account_size))
 
@@ -171,10 +236,16 @@ async def _create_issuance_challenge_config(
         base=base,
         model_type=model_type,
         account_size=account_size,
-        overrides=challenge_rules,
+        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
     )
 
-    label = f"Kalshi {model_type.upper()} ${int(account_size / 1000)}K"
+    label_prefix = {
+        MarketProvider.KALSHI: "Kalshi",
+        MarketProvider.SP500_DYNAMIC: "S&P 500",
+        MarketProvider.POLYMARKET: "Polymarket",
+        MarketProvider.INTERNAL: "Internal",
+    }.get(provider, provider.value)
+    label = f"{label_prefix} {model_type.upper()} ${int(account_size / 1000)}K"
     config = ChallengeConfig(
         tenant_id=tenant.id,
         name=label,
@@ -194,6 +265,13 @@ async def _create_issuance_challenge_config(
         model_type=model_type,
         min_consistency_score=resolved.get("min_consistency_score"),
         kalshi_market_tickers=product.kalshi_market_tickers or product.challenge_config.kalshi_market_tickers,
+        sp500_tickers=(
+            list(product.challenge_config.sp500_tickers)
+            if product.challenge_config and product.challenge_config.sp500_tickers
+            else list(DEFAULT_SP500_TICKERS)
+            if provider is MarketProvider.SP500_DYNAMIC
+            else None
+        ),
     )
     db.add(config)
     await db.flush()
@@ -236,7 +314,112 @@ async def list_challenge_templates(
                 "rules": rules,
             }
         )
+
+    # Built-in stock-event templates for S&P 500 Dynamic Markets issuance UI.
+    if provider is None or provider is MarketProvider.SP500_DYNAMIC:
+        for built_in in _sp500_stock_event_templates():
+            if any(t["id"] == built_in["id"] for t in templates):
+                continue
+            templates.append(built_in)
+
+    if provider is MarketProvider.SP500_DYNAMIC:
+        builtins = [t for t in templates if str(t["id"]).startswith("sp500-")]
+        products = [t for t in templates if not str(t["id"]).startswith("sp500-")]
+        return builtins + products
+
     return templates
+
+
+def _sp500_stock_event_templates() -> list[dict[str, Any]]:
+    """Pre-filled challenge rule templates for 0DTE / weekly stock events."""
+    specs = [
+        (
+            "sp500-0dte-standard",
+            "0DTE Stock Events · Standard",
+            "sp500-0dte",
+            "S&P 500 0DTE",
+            "1step",
+            25_000,
+            {
+                "profit_target_pct": 8,
+                "max_daily_loss_pct": 4,
+                "max_drawdown_pct": 8,
+                "drawdown_mode": "static",
+                "max_stake_per_order": 1_250,
+                "max_exposure_per_market": 2_500,
+                "min_trading_days": 5,
+                "challenge_duration_days": 30,
+                "profit_split_pct": 80,
+            },
+        ),
+        (
+            "sp500-weekly-standard",
+            "Weekly Stock Events · Standard",
+            "sp500-weekly",
+            "S&P 500 Weekly",
+            "1step",
+            50_000,
+            {
+                "profit_target_pct": 10,
+                "max_daily_loss_pct": 5,
+                "max_drawdown_pct": 10,
+                "drawdown_mode": "trailing",
+                "max_stake_per_order": 2_500,
+                "max_exposure_per_market": 5_000,
+                "min_trading_days": 7,
+                "challenge_duration_days": 45,
+                "profit_split_pct": 80,
+            },
+        ),
+        (
+            "sp500-0dte-aggressive",
+            "0DTE Stock Events · Aggressive",
+            "sp500-0dte-agg",
+            "S&P 500 0DTE Aggressive",
+            "instant",
+            25_000,
+            {
+                "profit_target_pct": 12,
+                "max_daily_loss_pct": 3,
+                "max_drawdown_pct": 6,
+                "drawdown_mode": "static",
+                "max_stake_per_order": 1_000,
+                "max_exposure_per_market": 2_000,
+                "min_trading_days": 3,
+                "challenge_duration_days": 21,
+                "profit_split_pct": 85,
+                "min_consistency_score": 0.55,
+            },
+        ),
+    ]
+    out: list[dict[str, Any]] = []
+    for tid, name, slug, label, model_type, size, overrides in specs:
+        base = {
+            "currency": "USD",
+            "starting_balance": float(size),
+            "provider": MarketProvider.SP500_DYNAMIC.value,
+            **overrides,
+        }
+        resolved = resolve_challenge_rules(
+            base=base,
+            model_type=model_type,
+            account_size=float(size),
+            overrides=None,
+        )
+        out.append(
+            {
+                "id": tid,
+                "name": name,
+                "provider": MarketProvider.SP500_DYNAMIC.value,
+                "prop_firm_account_id": None,
+                "prop_firm_slug": slug,
+                "prop_firm_label": label,
+                "rules": _rules_to_preview(
+                    resolved, model_type=model_type, account_size=float(size)
+                ),
+            }
+        )
+    return out
 
 
 def list_model_type_presets(*, account_size: int = 25_000, provider: str = "kalshi") -> list[dict[str, Any]]:
@@ -409,6 +592,7 @@ async def ensure_tenant_account_catalog(
     tenant: Tenant,
     *,
     include_kalshi: bool = False,
+    include_sp500: bool = False,
 ) -> PropFirmAccount:
     """Idempotently seed challenge configs and the default firm account for a tenant."""
     result = await db.execute(
@@ -423,6 +607,8 @@ async def ensure_tenant_account_catalog(
     if existing is not None:
         if include_kalshi:
             await _ensure_kalshi_product(db, tenant)
+        if include_sp500:
+            await _ensure_sp500_product(db, tenant)
         return existing
 
     program = {**DEFAULT_PROGRAM, **(tenant.program or {})}
@@ -449,6 +635,8 @@ async def ensure_tenant_account_catalog(
 
     if include_kalshi:
         await _ensure_kalshi_product(db, tenant, program_fields=_program_to_challenge_fields(program))
+    if include_sp500:
+        await _ensure_sp500_product(db, tenant, program_fields=_program_to_challenge_fields(program))
 
     await db.flush()
     await db.refresh(internal_product, attribute_names=["challenge_config"])
@@ -492,6 +680,59 @@ async def _ensure_kalshi_product(
         description="Trade linked Kalshi prediction markets.",
         provider=MarketProvider.KALSHI,
         kalshi_market_tickers=list(DEFAULT_KALSHI_TICKERS),
+        is_default=False,
+        is_active=True,
+    )
+    db.add(product)
+    await db.flush()
+    return product
+
+
+async def _ensure_sp500_product(
+    db: AsyncSession,
+    tenant: Tenant,
+    *,
+    program_fields: dict[str, Any] | None = None,
+) -> PropFirmAccount | None:
+    """Seed the S&P 500 Dynamic Markets evaluation product for a tenant."""
+    result = await db.execute(
+        select(PropFirmAccount).where(
+            PropFirmAccount.tenant_id == tenant.id,
+            PropFirmAccount.slug == "sp500-dynamic",
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        return None
+
+    fields = program_fields or _program_to_challenge_fields(
+        {**DEFAULT_PROGRAM, **(tenant.program or {})}
+    )
+    # Stock-event defaults: slightly tighter daily loss for 0DTE / weekly flows.
+    fields = {
+        **fields,
+        "profit_target_pct": float(fields.get("profit_target_pct", 8)),
+        "max_daily_loss_pct": float(fields.get("max_daily_loss_pct", 4)),
+        "max_drawdown_pct": float(fields.get("max_drawdown_pct", 8)),
+        "min_trading_days": int(fields.get("min_trading_days", 5)),
+        "challenge_duration_days": int(fields.get("challenge_duration_days", 30)),
+    }
+    sp500_config = ChallengeConfig(
+        tenant_id=tenant.id,
+        name="S&P 500 Dynamic Markets",
+        provider=MarketProvider.SP500_DYNAMIC,
+        sp500_tickers=list(DEFAULT_SP500_TICKERS),
+        **fields,
+    )
+    db.add(sp500_config)
+    await db.flush()
+
+    product = PropFirmAccount(
+        tenant_id=tenant.id,
+        challenge_config_id=sp500_config.id,
+        slug="sp500-dynamic",
+        label="S&P 500 Dynamic Markets",
+        description="Trade 0DTE and weekly S&P 500 stock-event prediction markets.",
+        provider=MarketProvider.SP500_DYNAMIC,
         is_default=False,
         is_active=True,
     )
@@ -736,6 +977,8 @@ async def provision_new_account(
 
     if resolved_provider is MarketProvider.KALSHI:
         await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
+    elif resolved_provider is MarketProvider.SP500_DYNAMIC:
+        await ensure_tenant_account_catalog(db, tenant, include_sp500=True)
 
     product: PropFirmAccount | None = None
     if prop_firm_account_slug:
@@ -746,7 +989,10 @@ async def provision_new_account(
         product = await get_default_prop_firm_account(db, tenant.id)
     if product is None:
         product = await ensure_tenant_account_catalog(
-            db, tenant, include_kalshi=resolved_provider is MarketProvider.KALSHI
+            db,
+            tenant,
+            include_kalshi=resolved_provider is MarketProvider.KALSHI,
+            include_sp500=resolved_provider is MarketProvider.SP500_DYNAMIC,
         )
 
     loaded = await db.execute(

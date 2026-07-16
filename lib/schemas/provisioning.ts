@@ -73,6 +73,11 @@ export const provisioningWebhookSchema = z
     trader_email: z.string().email().max(320),
     model_type: modelTypeSchema,
     account_size: accountSizeSchema,
+    provider: z
+      .enum(["internal", "polymarket", "kalshi", "sp500_dynamic"])
+      .optional()
+      .default("kalshi"),
+    sp500_tickers: z.array(z.string().min(1).max(16)).max(50).optional(),
     custom_rules: customRulesSchema,
     purchased_at: z.coerce.date().optional(),
     async: z.boolean().optional(),
@@ -84,6 +89,8 @@ export const provisioningWebhookSchema = z
     traderEmail: data.trader_email,
     modelType: data.model_type,
     accountSize: data.account_size,
+    provider: data.provider,
+    sp500Tickers: data.sp500_tickers,
     customRules: data.custom_rules,
     purchasedAt: data.purchased_at,
     activateImmediately: data.activate_immediately ?? false,

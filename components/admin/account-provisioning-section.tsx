@@ -14,14 +14,16 @@ export function AccountProvisioningSection() {
       <Card>
         <CardHeader
           title="Account provisioning"
-          subtitle="Issue Kalshi-linked evaluation accounts with custom challenge rules"
+          subtitle="Issue evaluation accounts for Kalshi, S&P 500 Dynamic, Polymarket, or internal markets"
           action={
             <IssueKalshiAccountButton onIssued={() => setRefreshKey((k) => k + 1)} />
           }
         />
         <CardBody>
           <p className="text-sm text-muted">
-            Traders receive virtual balances tied to live Kalshi markets. All P&amp;L is simulated;
+            Traders receive virtual balances tied to the selected market provider. Choose{" "}
+            <span className="font-medium text-foreground">S&amp;P 500 Dynamic Markets</span> to
+            open 0DTE / weekly stock-event boards automatically. All P&amp;L is simulated;
             challenge rules are enforced by the platform risk engine.
           </p>
         </CardBody>

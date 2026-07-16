@@ -36,11 +36,14 @@ router = APIRouter(tags=["account-provisioning"])
 def _to_provision_response(result) -> ProvisionAccountResponse:
     provider = result.account.provider.value
     kalshi_enabled = provider == "kalshi" and bool(result.kalshi_market_tickers)
-    message = (
-        f"Kalshi evaluation account {result.account.id} issued to {result.user.email}"
-        if provider == "kalshi"
-        else f"Evaluation account {result.account.id} issued to {result.user.email}"
-    )
+    if provider == "kalshi":
+        message = f"Kalshi evaluation account {result.account.id} issued to {result.user.email}"
+    elif provider == "sp500_dynamic":
+        message = (
+            f"S&P 500 Dynamic Markets account {result.account.id} issued to {result.user.email}"
+        )
+    else:
+        message = f"Evaluation account {result.account.id} issued to {result.user.email}"
     return ProvisionAccountResponse(
         message=message,
         user_id=result.user.id,

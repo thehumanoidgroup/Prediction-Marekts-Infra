@@ -81,10 +81,13 @@ export function challengeConfigToRules(
 
 export function toKalshiProvisionResponse(
   result: ProvisionNewAccountResult,
-  input: { displayName?: string; provider?: string },
+  input: { displayName?: string; provider?: string; sp500Tickers?: string[] },
 ) {
   const { account, credentials, emails } = result;
   const balance = account.traderDemoAccount?.virtualBalance ?? defaultVirtualBalance(account.accountSize);
+  const provider = input.provider ?? "kalshi";
+  const isKalshi = provider === "kalshi";
+  const isSp500 = provider === "sp500_dynamic";
 
   return {
     status: "created" as const,
@@ -95,14 +98,16 @@ export function toKalshiProvisionResponse(
     sold_record_id: account.id,
     email: account.traderEmail,
     display_name: input.displayName?.trim() || account.traderEmail.split("@")[0],
-    provider: input.provider ?? "kalshi",
+    provider,
     account_size: balance,
     model_type: account.modelType,
     created_user: true,
     email_sent: Boolean(emails?.trader?.sent || account.credentialsSentAt),
     credentials_generated: true,
-    kalshi_live_integration_enabled: true,
+    kalshi_live_integration_enabled: isKalshi,
     kalshi_market_tickers: [] as string[],
+    sp500_dynamic_enabled: isSp500,
+    sp500_tickers: isSp500 ? (input.sp500Tickers ?? []) : [],
     temporary_password: credentials.password ?? null,
     applied_rules: challengeConfigToRules(
       account.challengeConfig
@@ -125,7 +130,7 @@ export function toKalshiProvisionResponse(
             otherCustomRules: {},
           },
       {
-        provider: input.provider ?? "kalshi",
+        provider,
         modelType: account.modelType,
         accountSize: account.accountSize,
       },
@@ -134,17 +139,19 @@ export function toKalshiProvisionResponse(
 }
 
 export function toFirmSoldAccount(row: PropFirmAccountRecord, displayName?: string) {
+  const rules = row.challengeConfig?.otherCustomRules ?? {};
   return {
     id: row.id,
     created_at: row.createdAt,
     trader_demo_account_id: row.traderDemoAccount?.id ?? null,
-    provider: String(row.challengeConfig?.otherCustomRules?.provider ?? "kalshi"),
+    provider: String(rules.provider ?? "kalshi"),
     issuance_source: "manual",
     account_size: defaultVirtualBalance(row.accountSize),
     model_type: row.modelType,
     trader_email: row.traderEmail,
     trader_display_name: displayName ?? row.traderEmail.split("@")[0],
     kalshi_market_tickers: null,
+    sp500_tickers: Array.isArray(rules.sp500Tickers) ? (rules.sp500Tickers as string[]) : null,
     credentials_generated: true,
     email_sent: Boolean(row.credentialsSentAt),
   };

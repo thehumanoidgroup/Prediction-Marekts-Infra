@@ -68,6 +68,8 @@ export interface ProvisionResult {
   credentials_generated: boolean;
   kalshi_live_integration_enabled: boolean;
   kalshi_market_tickers: string[];
+  sp500_dynamic_enabled?: boolean;
+  sp500_tickers?: string[];
   temporary_password: string | null;
   applied_rules: ChallengeRules;
 }
@@ -83,6 +85,7 @@ export interface FirmSoldAccount {
   trader_email: string;
   trader_display_name: string;
   kalshi_market_tickers: string[] | null;
+  sp500_tickers?: string[] | null;
   credentials_generated: boolean;
   email_sent: boolean;
 }

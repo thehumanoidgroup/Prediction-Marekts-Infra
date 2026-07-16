@@ -39,6 +39,19 @@ function Field({
   );
 }
 
+const PROVIDERS = [
+  { id: "kalshi", label: "Kalshi", hint: "Live Kalshi prediction markets" },
+  {
+    id: "sp500_dynamic",
+    label: "S&P 500 Dynamic Markets",
+    hint: "0DTE & weekly stock strike events",
+  },
+  { id: "polymarket", label: "Polymarket", hint: "Polymarket CLOB markets" },
+  { id: "internal", label: "Internal LMSR", hint: "PropPredict simulation markets" },
+] as const;
+
+type ProviderId = (typeof PROVIDERS)[number]["id"];
+
 function IssuanceSuccess({
   result,
   onClose,
@@ -48,6 +61,13 @@ function IssuanceSuccess({
   onClose: () => void;
   onIssueAnother: () => void;
 }) {
+  const providerTone =
+    result.provider === "kalshi"
+      ? "accent"
+      : result.provider === "sp500_dynamic"
+        ? "neutral"
+        : "up";
+
   return (
     <div className="flex flex-col gap-5">
       <div className="rounded-xl border border-up/30 bg-up-soft/40 p-4">
@@ -58,9 +78,7 @@ function IssuanceSuccess({
               {result.display_name} · {result.email}
             </p>
           </div>
-          <Badge tone={result.provider === "kalshi" ? "accent" : "up"}>
-            {result.provider}
-          </Badge>
+          <Badge tone={providerTone}>{result.provider}</Badge>
         </div>
       </div>
 
@@ -73,12 +91,18 @@ function IssuanceSuccess({
         </div>
         <div>
           <dt className="text-muted">Provider</dt>
-          <dd className="font-semibold capitalize">{result.provider}</dd>
+          <dd className="font-semibold">
+            {result.provider === "sp500_dynamic" ? "S&P 500 Dynamic Markets" : result.provider}
+          </dd>
         </div>
         <div>
-          <dt className="text-muted">Live Kalshi feed</dt>
+          <dt className="text-muted">Live market feed</dt>
           <dd className="font-semibold">
-            {result.kalshi_live_integration_enabled ? "Enabled" : "—"}
+            {result.provider === "kalshi" && result.kalshi_live_integration_enabled
+              ? "Kalshi enabled"
+              : result.provider === "sp500_dynamic" || result.sp500_dynamic_enabled
+                ? "S&P 500 0DTE / Weekly"
+                : "—"}
           </dd>
         </div>
         <div>
@@ -114,6 +138,15 @@ function IssuanceSuccess({
             </dd>
           </div>
         ) : null}
+        {result.sp500_tickers && result.sp500_tickers.length > 0 ? (
+          <div className="sm:col-span-2">
+            <dt className="text-muted">S&P 500 tickers linked</dt>
+            <dd className="mt-1 text-[11px] text-faint">
+              {result.sp500_tickers.slice(0, 8).join(", ")}
+              {result.sp500_tickers.length > 8 ? "…" : ""}
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       <div className="flex flex-wrap gap-2">
@@ -134,7 +167,7 @@ function IssuanceSuccess({
   );
 }
 
-/** Full Kalshi demo account issuance flow for Prop Firm Admins. */
+/** Full evaluation account issuance flow for Prop Firm Admins. */
 export function KalshiIssuancePanel({
   open,
   onClose,
@@ -146,6 +179,7 @@ export function KalshiIssuancePanel({
 }) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [provider, setProvider] = useState<ProviderId>("kalshi");
   const [accountSize, setAccountSize] = useState<number>(25_000);
   const [modelType, setModelType] = useState<ModelType>("1step");
   const [templateId, setTemplateId] = useState<string>("");
@@ -162,25 +196,27 @@ export function KalshiIssuancePanel({
     if (!open) return;
     (async () => {
       try {
-        const response = await fetch("/api/admin/accounts/templates?provider=kalshi");
+        const response = await fetch(`/api/admin/accounts/templates?provider=${provider}`);
         if (response.ok) {
           setTemplates((await response.json()) as ChallengeTemplate[]);
+        } else {
+          setTemplates([]);
         }
       } catch {
-        /* templates optional */
+        setTemplates([]);
       }
     })();
-  }, [open]);
+  }, [open, provider]);
 
   const previewPayload = useMemo(
     () => ({
-      provider: "kalshi",
+      provider,
       account_size: accountSize,
       model_type: modelType,
       template_config_id: templateId || undefined,
       challenge_rules: Object.keys(customRules).length ? customRules : undefined,
     }),
-    [accountSize, modelType, templateId, customRules],
+    [provider, accountSize, modelType, templateId, customRules],
   );
 
   const loadPreview = useCallback(async () => {
@@ -211,6 +247,7 @@ export function KalshiIssuancePanel({
     const template = templates.find((t) => t.id === id);
     if (!template) return;
     setModelType(template.rules.model_type as ModelType);
+    setAccountSize(template.rules.account_size);
     setCustomRules({
       profit_target_pct: template.rules.profit_target_pct,
       max_daily_loss_pct: template.rules.max_daily_loss_pct,
@@ -235,7 +272,7 @@ export function KalshiIssuancePanel({
         body: JSON.stringify({
           email,
           display_name: displayName || undefined,
-          provider: "kalshi",
+          provider,
           account_size: accountSize,
           model_type: modelType,
           template_config_id: templateId || undefined,
@@ -260,6 +297,7 @@ export function KalshiIssuancePanel({
     setResult(null);
     setEmail("");
     setDisplayName("");
+    setProvider("kalshi");
     setAccountSize(25_000);
     setModelType("1step");
     setTemplateId("");
@@ -270,12 +308,20 @@ export function KalshiIssuancePanel({
 
   if (!open) return null;
 
+  const providerMeta = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const issueLabel =
+    provider === "sp500_dynamic"
+      ? "Issue S&P 500 account"
+      : provider === "kalshi"
+        ? "Issue Kalshi account"
+        : "Issue account";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Issue Kalshi demo account"
+      aria-label="Issue New Account"
     >
       <div
         className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl border border-edge bg-surface shadow-2xl sm:rounded-2xl"
@@ -283,9 +329,9 @@ export function KalshiIssuancePanel({
       >
         <div className="flex items-center justify-between border-b border-edge px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold tracking-tight">Issue New Kalshi Demo Account</h2>
+            <h2 className="text-base font-semibold tracking-tight">Issue New Account</h2>
             <p className="mt-0.5 text-xs text-muted">
-              Virtual evaluation account · live Kalshi market data
+              Virtual evaluation account · {providerMeta.hint}
             </p>
           </div>
           <button
@@ -351,13 +397,23 @@ export function KalshiIssuancePanel({
                         ))}
                       </select>
                     </Field>
-                    <Field label="Provider">
-                      <input
-                        type="text"
-                        value="Kalshi"
-                        disabled
-                        className={cn(inputClass, "opacity-70")}
-                      />
+                    <Field label="Provider" hint={providerMeta.hint}>
+                      <select
+                        value={provider}
+                        onChange={(e) => {
+                          const next = e.target.value as ProviderId;
+                          setProvider(next);
+                          setTemplateId("");
+                          setCustomRules({});
+                        }}
+                        className={inputClass}
+                      >
+                        {PROVIDERS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
                     </Field>
                   </div>
                 </section>
@@ -389,20 +445,28 @@ export function KalshiIssuancePanel({
                 {templates.length > 0 ? (
                   <section>
                     <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                      Copy from template
+                      {provider === "sp500_dynamic"
+                        ? "Stock event challenge templates"
+                        : "Copy from template"}
                     </h3>
                     <select
                       value={templateId}
                       onChange={(e) => applyTemplate(e.target.value)}
                       className={inputClass}
                     >
-                      <option value="">— Select existing template —</option>
+                      <option value="">— Select template —</option>
                       {templates.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.prop_firm_label ?? t.name} ({t.rules.model_type})
                         </option>
                       ))}
                     </select>
+                    {provider === "sp500_dynamic" ? (
+                      <p className="mt-1.5 text-[10px] text-faint">
+                        Templates pre-fill stake limits suited to 0DTE and weekly stock events.
+                        Issued accounts open with the S&amp;P 500 Markets board.
+                      </p>
+                    ) : null}
                   </section>
                 ) : null}
 
@@ -494,7 +558,7 @@ export function KalshiIssuancePanel({
               onClick={() => void submit()}
               className="min-w-[160px]"
             >
-              {submitting ? "Issuing…" : "Issue Kalshi account"}
+              {submitting ? "Issuing…" : issueLabel}
             </Button>
           </div>
         ) : null}
@@ -503,7 +567,7 @@ export function KalshiIssuancePanel({
   );
 }
 
-/** Trigger + modal wrapper for Kalshi issuance. */
+/** Trigger + modal wrapper for evaluation account issuance. */
 export function IssueKalshiAccountButton({ onIssued }: { onIssued?: () => void }) {
   const [open, setOpen] = useState(false);
 
@@ -513,7 +577,7 @@ export function IssueKalshiAccountButton({ onIssued }: { onIssued?: () => void }
         onClick={() => setOpen(true)}
         className="shadow-[0_0_24px_-6px_var(--tenant-accent)]"
       >
-        Issue New Kalshi Demo Account
+        Issue New Account
       </Button>
       <KalshiIssuancePanel
         open={open}

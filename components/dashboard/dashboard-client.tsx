@@ -203,7 +203,7 @@ export function DashboardClient({
           <JournalCard entries={journalEntries} />
 
           {account.provider === "kalshi" ? <KalshiMarketsSection /> : null}
-          <Sp500MarketsSection />
+          {account.provider === "sp500_dynamic" ? <Sp500MarketsSection /> : null}
 
           <LiveEventsSection />
         </div>
