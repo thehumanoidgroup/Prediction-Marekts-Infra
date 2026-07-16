@@ -19,7 +19,7 @@ function parseTickerFromMarketId(marketId: string): string | null {
 }
 
 /** Rank S&P 500 tickers by traded volume (markets + live journal fills). */
-export function getSp500TickerAnalytics(limit = 10): Sp500TickerStat[] {
+export async function getSp500TickerAnalytics(limit = 10): Promise<Sp500TickerStat[]> {
   const byTicker = new Map<string, Sp500TickerStat>();
 
   const ensure = (ticker: string): Sp500TickerStat => {
@@ -34,7 +34,7 @@ export function getSp500TickerAnalytics(limit = 10): Sp500TickerStat[] {
 
   let markets: Market[] = [];
   try {
-    markets = getActiveSp500Markets(false);
+    markets = await getActiveSp500Markets(false);
   } catch {
     markets = [];
   }

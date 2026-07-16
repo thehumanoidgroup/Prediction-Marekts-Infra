@@ -118,6 +118,9 @@ export function fromApiMaxBetMode(value: ApiMaxBetSizeMode): MaxBetSizeMode {
 }
 
 export function serializeChallengeConfig(row: PrismaChallengeConfig): ChallengeConfigRecord {
+  const sp500Tickers = Array.isArray(row.sp500Tickers)
+    ? (row.sp500Tickers as string[])
+    : null;
   return {
     id: row.id,
     propFirmAccountId: row.propFirmAccountId,
@@ -129,6 +132,7 @@ export function serializeChallengeConfig(row: PrismaChallengeConfig): ChallengeC
     consistencyScore:
       row.consistencyScore === null ? null : decimalToNumber(row.consistencyScore),
     otherCustomRules: (row.otherCustomRules ?? {}) as Record<string, unknown>,
+    sp500Tickers,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

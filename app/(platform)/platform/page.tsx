@@ -19,7 +19,7 @@ export default async function PlatformOverviewPage() {
   const firms = listFirmOverviews();
   const analytics = getPlatformAnalytics();
   const activity = await getPlatformActivity();
-  const sp500Tickers = getSp500TickerAnalytics(8);
+  const sp500Tickers = await getSp500TickerAnalytics(8);
 
   const kpis: Stat[] = [
     {
