@@ -69,7 +69,32 @@ export function useLiveEventsFeed(
     if (category !== "all") {
       events = events.filter((event) => event.category === category);
     }
-    events.sort((a, b) => b.volume - a.volume || a.question.localeCompare(b.question));
+
+    const byActivity = (a: LiveEvent, b: LiveEvent) =>
+      b.volume - a.volume || a.question.localeCompare(b.question);
+
+    if (source === "all" && limit) {
+      // Keep a balanced mix so Polymarket/Kalshi are not crowded out by internal volume.
+      const groups = (["internal", "polymarket", "kalshi"] as const).map((key) =>
+        events.filter((event) => event.source === key).sort(byActivity),
+      );
+      const mixed: LiveEvent[] = [];
+      let added = true;
+      while (added && mixed.length < limit) {
+        added = false;
+        for (const group of groups) {
+          const next = group.shift();
+          if (next) {
+            mixed.push(next);
+            added = true;
+            if (mixed.length >= limit) break;
+          }
+        }
+      }
+      return mixed;
+    }
+
+    events.sort(byActivity);
     if (limit) {
       events = events.slice(0, limit);
     }

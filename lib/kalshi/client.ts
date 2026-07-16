@@ -83,6 +83,17 @@ function marketStatus(raw: RawKalshiMarket, closesAt: number): import("@/types")
   return "open";
 }
 
+function pickKalshiQuestion(raw: RawKalshiMarket): string {
+  const title = String(raw.title ?? "").trim();
+  const subtitle = String(raw.subtitle ?? raw.yes_sub_title ?? "").trim();
+  // Multi-leg / MVE markets often concatenate many outcomes into `title`.
+  const titleLooksComposite = (title.match(/,/g) ?? []).length >= 2 || /^yes |^no /i.test(title);
+  if (titleLooksComposite && subtitle) return subtitle;
+  if (title && !titleLooksComposite) return title;
+  if (subtitle) return subtitle;
+  return title || String(raw.ticker ?? "Untitled Kalshi market");
+}
+
 export function normalizeKalshiMarket(raw: RawKalshiMarket): import("@/lib/types").KalshiMarket {
   const ticker = String(raw.ticker ?? "").trim();
   if (!ticker) throw new Error("Kalshi market is missing ticker");
@@ -91,10 +102,11 @@ export function normalizeKalshiMarket(raw: RawKalshiMarket): import("@/lib/types
   const closesAt = parseIsoMs(raw.close_time) ?? nowMs() + 30 * DAY_MS;
   const status = marketStatus(raw, closesAt);
   const now = nowMs();
+  const question = pickKalshiQuestion(raw);
 
   return {
     id: internalMarketId(ticker),
-    question: String(raw.title ?? "Untitled Kalshi market"),
+    question,
     category: inferCategory(raw),
     status,
     yesPrice,
@@ -134,10 +146,13 @@ export async function fetchKalshiMarkets(options: {
   status?: string;
   limit?: number;
   cursor?: string;
+  /** Exclude multi-leg combo markets (unreadable concatenated titles). */
+  excludeMve?: boolean;
 } = {}): Promise<{ markets: RawKalshiMarket[]; cursor: string | null }> {
   const params = new URLSearchParams();
   params.set("status", options.status ?? "open");
   params.set("limit", String(options.limit ?? 100));
+  if (options.excludeMve !== false) params.set("mve_filter", "exclude");
   if (options.cursor) params.set("cursor", options.cursor);
 
   const response = await fetch(`${getKalshiBaseUrl()}/markets?${params}`, {

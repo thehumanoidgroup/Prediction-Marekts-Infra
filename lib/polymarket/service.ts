@@ -6,7 +6,7 @@ import { getMockPolymarketMarkets } from "@/lib/polymarket-mock";
 const DAY_MS = 86_400_000;
 const DEFAULT_HOST = process.env.POLYMARKET_HOST ?? "https://clob.polymarket.com";
 const CACHE_TTL_MS = Number(process.env.POLYMARKET_CACHE_TTL_SECONDS ?? 300) * 1000;
-const MAX_PAGES = Number(process.env.POLYMARKET_MAX_FETCH_PAGES ?? 10);
+const MAX_PAGES = Number(process.env.POLYMARKET_MAX_FETCH_PAGES ?? 2);
 
 const TAG_CATEGORY_MAP: Record<string, MarketCategory> = {
   crypto: "crypto",
@@ -52,6 +52,10 @@ interface RawMarket {
   archived?: boolean;
   accepting_orders?: boolean;
   tags?: string[];
+  volume?: number | string;
+  volume_num?: number | string;
+  volume_24hr?: number | string;
+  liquidity?: number | string;
   tokens?: Array<{
     token_id?: string;
     outcome?: string;
@@ -136,6 +140,10 @@ export function normalizePolymarketMarket(raw: RawMarket): Market {
   const status = marketStatus(raw, closesAt);
   const now = nowMs();
 
+  const volume = Number(raw.volume_num ?? raw.volume ?? 0) || 0;
+  const volume24h = Number(raw.volume_24hr ?? volume) || 0;
+  const openInterest = Number(raw.liquidity ?? 0) || 0;
+
   const market: Market = {
     id: `poly-${conditionId.toLowerCase()}`,
     question: String(raw.question ?? "Untitled Polymarket market"),
@@ -143,9 +151,9 @@ export function normalizePolymarketMarket(raw: RawMarket): Market {
     status,
     yesPrice,
     change24h: 0,
-    volume: 0,
-    volume24h: 0,
-    openInterest: 0,
+    volume,
+    volume24h,
+    openInterest,
     traders: 0,
     closesAt,
     history: [{ t: now, p: yesPrice }],
@@ -171,7 +179,9 @@ async function fetchMarketsPage(cursor = ""): Promise<{
   data: RawMarket[];
   next_cursor: string;
 }> {
-  const url = new URL(`${DEFAULT_HOST.replace(/\/$/, "")}/markets`);
+  // `/sampling-markets` returns currently tradeable markets. Plain `/markets`
+  // is heavily historical/closed and yields empty "active" filters on Vercel.
+  const url = new URL(`${DEFAULT_HOST.replace(/\/$/, "")}/sampling-markets`);
   if (cursor) url.searchParams.set("next_cursor", cursor);
 
   const response = await fetch(url.toString(), {
@@ -234,7 +244,17 @@ export async function getAllPolymarketMarkets(refresh = false): Promise<Market[]
 
   try {
     const raw = await fetchAllRawMarkets();
-    const normalized = raw.map((market) => normalizePolymarketMarket(market));
+    const normalized: Market[] = [];
+    for (const market of raw) {
+      try {
+        normalized.push(normalizePolymarketMarket(market));
+      } catch {
+        /* skip malformed CLOB rows */
+      }
+    }
+    if (normalized.length === 0) {
+      return getMockPolymarketMarkets({ active: false });
+    }
     cacheSet(CACHE_ALL, normalized);
     return normalized;
   } catch {

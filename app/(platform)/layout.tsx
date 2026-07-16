@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { initialPricesFromEvents, listFallbackLiveEvents } from "@/lib/live-events";
+import { initialPricesFromEvents, listFallbackLiveEvents, listLiveEvents } from "@/lib/live-events";
 import { LivePricesProvider } from "@/lib/live-prices";
 import { getRequestTenant } from "@/lib/tenant-server";
 import { getAccount } from "@/lib/services";
@@ -9,7 +9,12 @@ export default async function PlatformLayout({ children }: { children: ReactNode
   const tenant = await getRequestTenant();
   const account = getAccount(tenant.id);
 
-  const liveEventsPayload = listFallbackLiveEvents();
+  let liveEventsPayload;
+  try {
+    liveEventsPayload = await listLiveEvents({ source: "all", perSource: 12 });
+  } catch {
+    liveEventsPayload = listFallbackLiveEvents({ source: "all" });
+  }
   const initialEvents = liveEventsPayload.events;
   const initialPrices = initialPricesFromEvents(initialEvents);
 
