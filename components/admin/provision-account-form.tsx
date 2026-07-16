@@ -11,13 +11,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const PROVIDERS = ["internal", "kalshi", "polymarket"] as const;
+const PROVIDERS = [
+  { id: "internal", label: "Internal LMSR" },
+  { id: "kalshi", label: "Kalshi" },
+  { id: "polymarket", label: "Polymarket" },
+  { id: "sp500_dynamic", label: "S&P 500 Dynamic Markets" },
+] as const;
 
 /** Firm admin form to manually issue an evaluation account. */
 export function ProvisionAccountForm() {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [provider, setProvider] = useState<(typeof PROVIDERS)[number]>("kalshi");
+  const [provider, setProvider] = useState<(typeof PROVIDERS)[number]["id"]>("kalshi");
   const [accountSize, setAccountSize] = useState<number>(25_000);
   const [modelType, setModelType] = useState<ModelType>("1step");
   const [customRules, setCustomRules] = useState<ChallengeRulesInput>({});
@@ -63,7 +68,8 @@ export function ProvisionAccountForm() {
       <div>
         <h3 className="text-sm font-semibold">Issue evaluation account</h3>
         <p className="text-xs text-muted">
-          Provision a Kalshi-linked or internal demo account with optional challenge rule overrides.
+          Provision a demo account for Kalshi, S&amp;P 500 Dynamic, Polymarket, or internal markets
+          with optional challenge rule overrides.
         </p>
       </div>
 
@@ -92,12 +98,12 @@ export function ProvisionAccountForm() {
           <span className="text-muted">Provider</span>
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value as (typeof PROVIDERS)[number])}
+            onChange={(e) => setProvider(e.target.value as (typeof PROVIDERS)[number]["id"])}
             className="h-9 rounded-lg border border-edge bg-surface px-3 text-sm"
           >
             {PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {p}
+              <option key={p.id} value={p.id}>
+                {p.label}
               </option>
             ))}
           </select>
@@ -160,6 +166,12 @@ export function ProvisionAccountForm() {
           {result.kalshi_live_integration_enabled ? (
             <p className="mt-1 text-xs text-muted">
               Kalshi live feed enabled ({result.kalshi_market_tickers.length} markets)
+            </p>
+          ) : null}
+          {result.sp500_dynamic_enabled || result.provider === "sp500_dynamic" ? (
+            <p className="mt-1 text-xs text-muted">
+              S&amp;P 500 0DTE / Weekly markets enabled
+              {result.sp500_tickers?.length ? ` (${result.sp500_tickers.length} tickers)` : ""}
             </p>
           ) : null}
         </div>

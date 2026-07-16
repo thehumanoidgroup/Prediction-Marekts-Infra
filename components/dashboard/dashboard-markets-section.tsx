@@ -17,6 +17,10 @@ function sectionTitle(source: MarketViewSource): string {
       return "Internal Markets";
     case "polymarket":
       return "Polymarket Markets";
+    case "kalshi":
+      return "Kalshi Markets";
+    case "sp500_dynamic":
+      return "S&P 500 Markets";
     default:
       return "Hybrid Markets";
   }
@@ -28,8 +32,12 @@ function sectionSubtitle(source: MarketViewSource): string {
       return "PropPredict LMSR simulation markets";
     case "polymarket":
       return "Live odds from Polymarket CLOB";
+    case "kalshi":
+      return "Live odds from Kalshi";
+    case "sp500_dynamic":
+      return "Dynamic 0DTE & weekly stock strikes";
     default:
-      return "Internal LMSR + live Polymarket listings";
+      return "Internal LMSR + Polymarket + Kalshi + S&P 500";
   }
 }
 
@@ -43,11 +51,7 @@ function DashboardMarketsSectionBody() {
   const isError = payload.status === "error";
 
   const viewAllHref =
-    source === "polymarket"
-      ? "/markets?source=polymarket"
-      : source === "internal"
-        ? "/markets?source=internal"
-        : "/markets";
+    source === "all" ? "/markets" : `/markets?source=${source}`;
 
   return (
     <Card>
@@ -55,7 +59,7 @@ function DashboardMarketsSectionBody() {
         title={sectionTitle(source)}
         subtitle={
           counts && source === "all"
-            ? `${sectionSubtitle(source)} · ${counts.internal} LMSR · ${counts.polymarket} Polymarket`
+            ? `${sectionSubtitle(source)} · ${counts.internal} LMSR · ${counts.polymarket} Polymarket · ${counts.kalshi ?? 0} Kalshi · ${counts.sp500_dynamic ?? 0} S&P 500`
             : sectionSubtitle(source)
         }
         action={

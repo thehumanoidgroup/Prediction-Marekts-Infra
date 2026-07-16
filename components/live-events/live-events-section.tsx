@@ -17,6 +17,8 @@ function sectionTitle(source: MarketViewSource): string {
       return "Live Events · Polymarket";
     case "kalshi":
       return "Live Events · Kalshi";
+    case "sp500_dynamic":
+      return "Live Events · S&P 500";
     default:
       return "Live Events";
   }
@@ -30,6 +32,8 @@ function sectionSubtitle(source: MarketViewSource): string {
       return "Live odds from Polymarket CLOB";
     case "kalshi":
       return "Live odds from Kalshi";
+    case "sp500_dynamic":
+      return "Dynamic S&P 500 stock prediction markets";
     default:
       return "Internal LMSR + live external feeds";
   }
@@ -46,6 +50,7 @@ function LiveEventsSectionBody() {
           internal: events.filter((event) => event.source === "internal").length,
           polymarket: events.filter((event) => event.source === "polymarket").length,
           kalshi: events.filter((event) => event.source === "kalshi").length,
+          sp500_dynamic: events.filter((event) => event.source === "sp500_dynamic").length,
         };
 
   const isLoading = payload.status === "loading";
@@ -56,9 +61,11 @@ function LiveEventsSectionBody() {
       ? "/markets?source=polymarket"
       : source === "kalshi"
         ? "/markets?source=kalshi"
-        : source === "internal"
-          ? "/markets?source=internal"
-          : "/markets";
+        : source === "sp500_dynamic"
+          ? "/markets?source=sp500_dynamic"
+          : source === "internal"
+            ? "/markets?source=internal"
+            : "/markets";
 
   return (
     <Card>
@@ -66,7 +73,7 @@ function LiveEventsSectionBody() {
         title={sectionTitle(source)}
         subtitle={
           source === "all"
-            ? `${sectionSubtitle(source)} · ${counts.internal} Internal · ${counts.polymarket} Poly · ${counts.kalshi ?? 0} Kalshi`
+            ? `${sectionSubtitle(source)} · ${counts.internal} Internal · ${counts.polymarket} Poly · ${counts.kalshi ?? 0} Kalshi · ${counts.sp500_dynamic ?? 0} S&P 500`
             : sectionSubtitle(source)
         }
         action={

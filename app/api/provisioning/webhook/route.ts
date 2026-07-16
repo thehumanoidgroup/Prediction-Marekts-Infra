@@ -27,7 +27,12 @@ import { extractApiKeyFromRequest } from "@/lib/provisioning/api-keys";
  * Secured with per-firm API key (`X-API-Key` or `Authorization: Bearer ppk_...`).
  *
  * Body (snake_case):
- * { prop_firm_id, trader_email, model_type, account_size, custom_rules?, async? }
+ * {
+ *   prop_firm_id, trader_email, model_type, account_size,
+ *   provider?: "internal"|"polymarket"|"kalshi"|"sp500_dynamic",
+ *   sp500_tickers?: string[],
+ *   custom_rules?, async?
+ * }
  */
 export async function POST(request: NextRequest) {
   if (!process.env.DATABASE_URL) return provisioningDbUnavailable();
@@ -89,9 +94,23 @@ export async function POST(request: NextRequest) {
   if (isAuthError(auth)) return auth;
 
   try {
+    const provider = parsed.provider ?? "kalshi";
+    const sp500Tickers =
+      provider === "sp500_dynamic"
+        ? parsed.sp500Tickers?.map((t) => t.toUpperCase())
+        : undefined;
+
     const response = await executeProvisioningRequest(
       {
         ...parsed,
+        provider,
+        sp500Tickers,
+        challengeConfigOverrides: {
+          otherCustomRules: {
+            provider,
+            ...(sp500Tickers?.length ? { sp500Tickers } : {}),
+          },
+        },
         loginMode: "password",
         auditContext: {
           apiKeyId: auth.keyId,

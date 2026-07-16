@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.runtime.hybrid_markets import get_hybrid_market, list_hybrid_markets
+from app.runtime.store import get_trading_store
 
 
 @pytest.mark.asyncio
@@ -79,12 +80,51 @@ async def test_get_hybrid_market_internal():
 
 
 @pytest.mark.asyncio
-async def test_get_hybrid_market_polymarket():
-    sample = {"id": "poly-0xabc", "source": "polymarket", "question": "Test?"}
-    with patch(
-        "app.runtime.hybrid_markets.get_polymarket_service",
-    ) as mock_get_service:
-        mock_get_service.return_value.get_market_by_id = AsyncMock(return_value=sample)
-        market = await get_hybrid_market("poly-0xabc")
+async def test_list_hybrid_markets_sp500_allowlist():
+    store = get_trading_store()
+    store.create_market(
+        market_id="sp500-AAPL-0dte-2099-01-02-200",
+        question="Will AAPL close above $200?",
+        category="stocks",
+        base_price=0.5,
+        closes_at=9999999999999,
+        source="sp500_dynamic",
+        stock_ticker="AAPL",
+    )
+    store.create_market(
+        market_id="sp500-MSFT-0dte-2099-01-02-400",
+        question="Will MSFT close above $400?",
+        category="stocks",
+        base_price=0.5,
+        closes_at=9999999999999,
+        source="sp500_dynamic",
+        stock_ticker="MSFT",
+    )
 
-    assert market == sample
+    result = await list_hybrid_markets(
+        source="sp500_dynamic",
+        sp500_tickers=["AAPL"],
+    )
+    assert result["source"] == "sp500_dynamic"
+    assert result["counts"]["sp500_dynamic"] >= 1
+    assert all(m.get("stockTicker") == "AAPL" for m in result["markets"])
+    assert all(m["id"].startswith("sp500-AAPL-") for m in result["markets"])
+
+
+@pytest.mark.asyncio
+async def test_get_hybrid_market_sp500():
+    store = get_trading_store()
+    market_id = "sp500-NVDA-weekly-2099-01-03-120"
+    store.create_market(
+        market_id=market_id,
+        question="Will NVDA close above $120 this week?",
+        category="stocks",
+        base_price=0.48,
+        closes_at=9999999999999,
+        source="sp500_dynamic",
+        stock_ticker="NVDA",
+    )
+    market = await get_hybrid_market(market_id)
+    assert market is not None
+    assert market["source"] == "sp500_dynamic"
+    assert market["stockTicker"] == "NVDA"

@@ -6,8 +6,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-ProviderName = Literal["internal", "polymarket", "kalshi"]
+ProviderName = Literal["internal", "polymarket", "kalshi", "sp500_dynamic"]
 ModelType = Literal["1step", "2step", "3step", "instant", "evaluation"]
+StockExpirationName = Literal["0dte", "weekly"]
 
 
 class ChallengeRulesInput(BaseModel):
@@ -77,6 +78,13 @@ class ProvisionAccountRequest(BaseModel):
     challenge_rules: ChallengeRulesInput | None = None
     prop_firm_account_slug: str | None = None
     kalshi_categories: list[str] | None = None
+    # S&P 500 dynamic (optional — only used when provider=sp500_dynamic).
+    stock_ticker: str | None = Field(None, max_length=16)
+    strike_price: float | None = Field(None, gt=0)
+    expiration_type: StockExpirationName | None = None
+    expiration_date: str | None = Field(
+        None, description="ISO date YYYY-MM-DD for stock market resolution"
+    )
     send_credentials_email: bool = True
     replace_existing: bool = True
 
@@ -126,6 +134,8 @@ class ProvisionAccountResponse(BaseModel):
     credentials_generated: bool
     kalshi_live_integration_enabled: bool
     kalshi_market_tickers: list[str]
+    sp500_dynamic_enabled: bool = False
+    sp500_tickers: list[str] = Field(default_factory=list)
     temporary_password: str | None = None
     applied_rules: ChallengeRulesPreview
 
@@ -148,6 +158,7 @@ class SoldAccountOut(BaseModel):
     trader_display_name: str
     external_order_id: str | None
     kalshi_market_tickers: list[str] | None
+    sp500_tickers: list[str] | None = None
     credentials_generated: bool
     email_sent: bool
     issued_by_user_id: str | None

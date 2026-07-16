@@ -15,7 +15,11 @@ import type { LiveEvent, LiveEventStatus } from "@/lib/types";
 /**
  * Live market prices and events for the whole app.
  *
- * Uses a client-side simulator on Vercel (single-app deployment).
+ * YES probabilities use a client simulator on Vercel. Underlying S&P 500
+ * equity quotes poll Alpaca REST for **viewed tickers only** (and consume
+ * ``stock_quote`` WebSocket frames when a backend bridge is connected).
+ *
+ * Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
  */
 
 export type FeedStatus = "connecting" | "live" | "simulated";
@@ -27,16 +31,20 @@ interface OptimisticEntry {
 
 interface LivePricesContextValue {
   prices: Record<string, number>;
+  /** Underlying equity last prices keyed by ticker (e.g. AAPL). */
+  stockQuotes: Record<string, number>;
   events: LiveEvent[];
   status: FeedStatus;
   mergeEvents: (events: LiveEvent[]) => void;
   optimisticUpdatePrice: (marketId: string, yes: number) => void;
+  registerViewedTicker: (ticker: string) => void;
 }
 
 const LivePricesContext = createContext<LivePricesContextValue | null>(null);
 
 const SIMULATOR_INTERVAL_MS = 1_800;
 const OPTIMISTIC_TTL_MS = 2_500;
+const STOCK_QUOTE_POLL_MS = 2_000;
 const clamp = (p: number) => Math.min(0.97, Math.max(0.03, p));
 
 function applyPriceToEvents(events: LiveEvent[], externalId: string, yes: number): LiveEvent[] {
@@ -65,12 +73,24 @@ function applyLiveMessage(
   message: Record<string, unknown>,
   setPrices: React.Dispatch<React.SetStateAction<Record<string, number>>>,
   setEvents: React.Dispatch<React.SetStateAction<LiveEvent[]>>,
+  setStockQuotes: React.Dispatch<React.SetStateAction<Record<string, number>>>,
   clearOptimistic: (marketId: string) => void,
 ) {
   if (message.type === "batch_update" && Array.isArray(message.updates)) {
     for (const update of message.updates as Record<string, unknown>[]) {
-      applyLiveMessage(update, setPrices, setEvents, clearOptimistic);
+      applyLiveMessage(update, setPrices, setEvents, setStockQuotes, clearOptimistic);
     }
+    return;
+  }
+
+  if (message.type === "stock_quote" && message.data) {
+    const data = message.data as Record<string, unknown>;
+    const ticker = String(data.stock_ticker ?? "").toUpperCase();
+    const last = Number(data.last_price);
+    if (!ticker || !Number.isFinite(last)) return;
+    setStockQuotes((current) =>
+      current[ticker] === last ? current : { ...current, [ticker]: last },
+    );
     return;
   }
 
@@ -141,6 +161,8 @@ function applyLiveMessage(
         volume24h: Number(data.volume_24h ?? 0),
         change24h: Number(data.change_24h ?? 0),
         lastUpdated: new Date().toISOString(),
+        stockTicker: data.stock_ticker ? String(data.stock_ticker) : null,
+        strikePrice: data.strike_price != null ? Number(data.strike_price) : null,
       };
       clearOptimistic(externalId);
       setEvents((current) => upsertEvent(current, incoming));
@@ -174,9 +196,11 @@ export function LivePricesProvider({
   children: ReactNode;
 }) {
   const [prices, setPrices] = useState(initialPrices);
+  const [stockQuotes, setStockQuotes] = useState<Record<string, number>>({});
   const [events, setEvents] = useState<LiveEvent[]>(initialEvents);
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const [optimistic, setOptimistic] = useState<Record<string, OptimisticEntry>>({});
+  const [viewedTickers, setViewedTickers] = useState<string[]>([]);
   const simulatorRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingMessages = useRef<Record<string, unknown>[]>([]);
   const flushScheduled = useRef(false);
@@ -196,7 +220,7 @@ export function LivePricesProvider({
     if (batch.length === 0) return;
 
     for (const message of batch) {
-      applyLiveMessage(message, setPrices, setEvents, clearOptimistic);
+      applyLiveMessage(message, setPrices, setEvents, setStockQuotes, clearOptimistic);
     }
   }, [clearOptimistic]);
 
@@ -209,6 +233,14 @@ export function LivePricesProvider({
     },
     [flushPending],
   );
+
+  const registerViewedTicker = useCallback((ticker: string) => {
+    const symbol = ticker.trim().toUpperCase();
+    if (!symbol) return;
+    setViewedTickers((current) =>
+      current.includes(symbol) ? current : [...current, symbol].slice(-30),
+    );
+  }, []);
 
   const mergeEvents = useCallback((incoming: LiveEvent[]) => {
     setEvents((current) => {
@@ -225,6 +257,9 @@ export function LivePricesProvider({
       }
       return next;
     });
+    // Do not auto-register every sp500_dynamic ticker from feed merges —
+    // that floods the free-tier 30-symbol envelope. Cards call
+    // useRegisterViewedTicker / useLiveEventView when actually on screen.
   }, []);
 
   const optimisticUpdatePrice = useCallback((marketId: string, yes: number) => {
@@ -254,6 +289,8 @@ export function LivePricesProvider({
       });
       setEvents((current) =>
         current.map((event) => {
+          // Keep LMSR YES simulation; do not drift underlying equity quotes.
+          if (event.source === "sp500_dynamic") return event;
           const drift = (Math.random() - 0.5) * 0.02;
           const yes = clamp(event.yesPrice + drift);
           return {
@@ -292,6 +329,78 @@ export function LivePricesProvider({
     };
   }, [startSimulator]);
 
+  // Poll Alpaca REST for currently viewed S&P 500 tickers only.
+  // Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+  useEffect(() => {
+    if (viewedTickers.length === 0) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/sp500/quotes?tickers=${encodeURIComponent(viewedTickers.join(","))}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok || cancelled) return;
+        const payload = (await response.json()) as {
+          quotes?: Record<string, { lastPrice?: number }>;
+        };
+        const quotes = payload.quotes ?? {};
+        if (cancelled) return;
+        setStockQuotes((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const [ticker, row] of Object.entries(quotes)) {
+            const price = Number(row.lastPrice);
+            if (!Number.isFinite(price)) continue;
+            if (next[ticker] !== price) {
+              next[ticker] = price;
+              changed = true;
+            }
+          }
+          return changed ? next : current;
+        });
+        setStatus((current) => (current === "connecting" ? "live" : current));
+      } catch {
+        // keep last quotes
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => {
+      void poll();
+    }, STOCK_QUOTE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [viewedTickers]);
+
+  // Optional FastAPI markets WebSocket (when NEXT_PUBLIC_MARKETS_WS_URL is set).
+  useEffect(() => {
+    const wsBase = process.env.NEXT_PUBLIC_MARKETS_WS_URL;
+    if (!wsBase) return;
+    const url = `${wsBase.replace(/\/$/, "")}/ws/markets/${encodeURIComponent(tenantSlug)}`;
+    let socket: WebSocket | null = null;
+    try {
+      socket = new WebSocket(url);
+    } catch {
+      return;
+    }
+    socket.onopen = () => setStatus("live");
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+        queueMessage(message);
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    return () => {
+      socket?.close();
+    };
+  }, [queueMessage, tenantSlug]);
+
   const mergedPrices = useMemo(() => {
     const next = { ...prices };
     const now = Date.now();
@@ -306,12 +415,22 @@ export function LivePricesProvider({
   const value = useMemo(
     () => ({
       prices: mergedPrices,
+      stockQuotes,
       events,
       status,
       mergeEvents,
       optimisticUpdatePrice,
+      registerViewedTicker,
     }),
-    [mergedPrices, events, status, mergeEvents, optimisticUpdatePrice],
+    [
+      mergedPrices,
+      stockQuotes,
+      events,
+      status,
+      mergeEvents,
+      optimisticUpdatePrice,
+      registerViewedTicker,
+    ],
   );
 
   return <LivePricesContext.Provider value={value}>{children}</LivePricesContext.Provider>;
@@ -325,6 +444,19 @@ export function useFeedStatus(): FeedStatus {
 export function useLivePrice(marketId: string, fallback: number): number {
   const context = useContext(LivePricesContext);
   return context?.prices[marketId] ?? fallback;
+}
+
+/** Underlying equity last price for an S&P 500 ticker (Alpaca IEX). */
+export function useLiveStockPrice(ticker: string | null | undefined): number | null {
+  const context = useContext(LivePricesContext);
+  if (!ticker) return null;
+  const price = context?.stockQuotes[ticker.toUpperCase()];
+  return typeof price === "number" ? price : null;
+}
+
+export function useRegisterViewedTicker(): (ticker: string) => void {
+  const context = useContext(LivePricesContext);
+  return context?.registerViewedTicker ?? (() => undefined);
 }
 
 export function useLiveEvents(): LiveEvent[] {

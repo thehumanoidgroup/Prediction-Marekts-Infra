@@ -16,13 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 def _event_key(message: dict[str, Any]) -> str:
+    data = message.get("data") or {}
+    if message.get("type") == "stock_quote" and data.get("stock_ticker"):
+        return f"stock:{str(data['stock_ticker']).upper()}"
     return str(message.get("event_id") or message.get("market_id") or "")
 
 
 def _price_delta(message: dict[str, Any]) -> float | None:
-    if message.get("type") != "price_update":
-        return None
+    msg_type = message.get("type")
     data = message.get("data") or {}
+    if msg_type == "stock_quote":
+        last = data.get("last_price")
+        return float(last) if last is not None else None
+    if msg_type != "price_update":
+        return None
     probabilities = data.get("probabilities") or {}
     yes = probabilities.get("yes")
     if yes is None:
@@ -61,12 +68,18 @@ class UpdateBatcher:
         settings = get_settings()
         msg_type = str(message.get("type", ""))
 
-        if msg_type == "price_update":
+        if msg_type in {"price_update", "stock_quote"}:
             event_id = _event_key(message)
             yes = _price_delta(message)
             if event_id and yes is not None:
                 previous = self._last_sent_price.get(event_id)
-                if previous is not None and abs(yes - previous) < settings.ws_min_price_delta:
+                # Stock quotes use absolute USD; keep a small absolute floor.
+                min_delta = (
+                    0.01
+                    if msg_type == "stock_quote"
+                    else settings.ws_min_price_delta
+                )
+                if previous is not None and abs(yes - previous) < min_delta:
                     return
 
         outbound = dict(message)

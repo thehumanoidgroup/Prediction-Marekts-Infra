@@ -5,9 +5,11 @@ from app.models.account import (
     MarketProvider,
     PropFirmAccount,
     SoldAccount,
+    StockExpirationType,
     TraderDemoAccount,
 )
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
+from app.models.resolution_audit import MarketResolutionAudit, ResolutionAuditStatus
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
 
@@ -20,8 +22,11 @@ __all__ = [
     "LiveEventStatus",
     "IssuanceSource",
     "MarketProvider",
+    "MarketResolutionAudit",
     "PropFirmAccount",
+    "ResolutionAuditStatus",
     "SoldAccount",
+    "StockExpirationType",
     "Tenant",
     "TraderDemoAccount",
     "User",

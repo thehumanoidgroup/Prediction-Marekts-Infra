@@ -6,7 +6,7 @@ import { formatCompactUsd } from "@/lib/format";
 import { useLiveEventView } from "@/hooks/use-live-event-view";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { LiveProbability } from "@/components/markets/live-price";
+import { LiveProbability, LiveStockQuote } from "@/components/markets/live-price";
 import { LiveProbabilityBar } from "@/components/markets/live-probability-bar";
 import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,9 @@ export function LiveEventCard({ event }: { event: LiveEvent }) {
       ? `/markets/${event.externalId}?source=polymarket`
       : event.source === "kalshi"
         ? `/markets/${event.externalId}?source=kalshi`
-        : `/markets/${event.externalId}`;
+        : event.source === "sp500_dynamic"
+          ? `/markets/${event.externalId}?source=sp500_dynamic`
+          : `/markets/${event.externalId}`;
   const accent = categoryAccent[event.category] ?? "border-l-accent";
 
   return (
@@ -79,15 +81,37 @@ export function LiveEventCard({ event }: { event: LiveEvent }) {
         </h3>
 
         <div className="mt-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
-            YES probability
-          </p>
-          <div className="mt-1 flex items-end justify-between gap-3">
-            <LiveProbability
-              marketId={event.externalId}
-              initialPrice={event.yesPrice}
-              className="text-3xl font-bold tracking-tight sm:text-[2rem]"
-            />
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
+                YES probability
+              </p>
+              <LiveProbability
+                marketId={event.externalId}
+                initialPrice={event.yesPrice}
+                className="mt-1 text-3xl font-bold tracking-tight sm:text-[2rem]"
+              />
+            </div>
+            {event.source === "sp500_dynamic" && event.stockTicker ? (
+              <div className="text-right">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
+                  {event.stockTicker} last
+                </p>
+                <LiveStockQuote
+                  ticker={event.stockTicker}
+                  className="mt-1 text-xl font-semibold tracking-tight text-foreground"
+                />
+                {event.strikePrice != null ? (
+                  <p className="mt-0.5 text-[11px] text-muted">
+                    Strike $
+                    {Number(event.strikePrice).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="mt-3">
             <LiveProbabilityBar marketId={event.externalId} initialPrice={event.yesPrice} />

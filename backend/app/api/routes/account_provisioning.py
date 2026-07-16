@@ -36,11 +36,16 @@ router = APIRouter(tags=["account-provisioning"])
 def _to_provision_response(result) -> ProvisionAccountResponse:
     provider = result.account.provider.value
     kalshi_enabled = provider == "kalshi" and bool(result.kalshi_market_tickers)
-    message = (
-        f"Kalshi evaluation account {result.account.id} issued to {result.user.email}"
-        if provider == "kalshi"
-        else f"Evaluation account {result.account.id} issued to {result.user.email}"
-    )
+    sp500_tickers = list(getattr(result, "sp500_tickers", None) or [])
+    sp500_enabled = provider == "sp500_dynamic" and bool(sp500_tickers)
+    if provider == "kalshi":
+        message = f"Kalshi evaluation account {result.account.id} issued to {result.user.email}"
+    elif provider == "sp500_dynamic":
+        message = (
+            f"S&P 500 Dynamic Markets account {result.account.id} issued to {result.user.email}"
+        )
+    else:
+        message = f"Evaluation account {result.account.id} issued to {result.user.email}"
     return ProvisionAccountResponse(
         message=message,
         user_id=result.user.id,
@@ -57,9 +62,19 @@ def _to_provision_response(result) -> ProvisionAccountResponse:
         credentials_generated=bool(result.temporary_password),
         kalshi_live_integration_enabled=kalshi_enabled,
         kalshi_market_tickers=result.kalshi_market_tickers,
+        sp500_dynamic_enabled=sp500_enabled,
+        sp500_tickers=sp500_tickers,
         temporary_password=result.temporary_password,
         applied_rules=ChallengeRulesPreview.model_validate(result.applied_rules),
     )
+
+
+def _sold_sp500_tickers(r: SoldAccount) -> list[str] | None:
+    meta = r.metadata_json or {}
+    raw = meta.get("sp500_tickers")
+    if isinstance(raw, list) and raw:
+        return [str(t).upper() for t in raw]
+    return None
 
 
 def _sold_row(r: SoldAccount, tenant: Tenant | None = None) -> SoldAccountOut:
@@ -79,6 +94,7 @@ def _sold_row(r: SoldAccount, tenant: Tenant | None = None) -> SoldAccountOut:
         trader_display_name=r.trader_display_name,
         external_order_id=r.external_order_id,
         kalshi_market_tickers=r.kalshi_market_tickers,
+        sp500_tickers=_sold_sp500_tickers(r),
         credentials_generated=r.credentials_generated,
         email_sent=r.email_sent,
         issued_by_user_id=r.issued_by_user_id,

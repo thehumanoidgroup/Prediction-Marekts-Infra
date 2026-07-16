@@ -62,6 +62,7 @@ export interface ChallengeConfigRecord {
   maxBetSizeMode: MaxBetSizeMode;
   consistencyScore: number | null;
   otherCustomRules: Record<string, unknown>;
+  sp500Tickers?: string[] | null;
   createdAt: string;
   updatedAt: string;
 }

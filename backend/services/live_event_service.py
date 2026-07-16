@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.live_event import EventUpdate, LiveEvent, LiveEventSource, LiveEventStatus
+from app.models.account import StockExpirationType
 from app.runtime.serializers import serialize_market
 from app.runtime.store import get_trading_store
 from integrations.kalshi import KalshiError, get_kalshi_service
@@ -25,6 +27,34 @@ _STATUS_MAP = {
     "closing_soon": LiveEventStatus.CLOSING_SOON,
     "resolved": LiveEventStatus.RESOLVED,
 }
+
+
+def _coerce_expiration_type(value: Any) -> StockExpirationType | None:
+    if value is None:
+        return None
+    if isinstance(value, StockExpirationType):
+        return value
+    text = str(value).strip().lower().replace("-", "")
+    if text in {"0dte", "zerodte"}:
+        return StockExpirationType.ZERO_DTE
+    if text == "weekly":
+        return StockExpirationType.WEEKLY
+    return None
+
+
+def _coerce_expiration_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if "T" in text:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    return date.fromisoformat(text[:10])
 
 
 def _normalize_probabilities(raw: dict[str, Any] | None) -> dict[str, float]:
@@ -63,12 +93,12 @@ def _source_from_string(value: str) -> LiveEventSource:
 
 
 def _market_to_event_fields(market: dict[str, Any]) -> dict[str, Any]:
-    source_raw = str(market.get("source", "internal"))
+    source_raw = str(market.get("source", market.get("provider", "internal")))
     source = _source_from_string(source_raw)
     status_raw = str(market.get("status", "open"))
     status = _STATUS_MAP.get(status_raw, LiveEventStatus.OPEN)
 
-    return {
+    fields: dict[str, Any] = {
         "external_id": str(market["id"]),
         "source": source,
         "category": str(market.get("category", "economics")),
@@ -83,7 +113,43 @@ def _market_to_event_fields(market: dict[str, Any]) -> dict[str, Any]:
         "volume": float(market.get("volume") or 0.0),
         "volume_24h": float(market.get("volume24h") or 0.0),
         "change_24h": float(market.get("change24h") or 0.0),
+        "stock_ticker": None,
+        "strike_price": None,
+        "expiration_type": None,
+        "expiration_date": None,
     }
+
+    ticker = market.get("stockTicker") or market.get("stock_ticker")
+    if ticker:
+        fields["stock_ticker"] = str(ticker).strip().upper()
+    if market.get("strikePrice") is not None or market.get("strike_price") is not None:
+        raw_strike = market.get("strikePrice")
+        if raw_strike is None:
+            raw_strike = market.get("strike_price")
+        fields["strike_price"] = float(raw_strike)
+    fields["expiration_type"] = _coerce_expiration_type(
+        market.get("expirationType") or market.get("expiration_type")
+    )
+    fields["expiration_date"] = _coerce_expiration_date(
+        market.get("expirationDate") or market.get("expiration_date")
+    )
+    return fields
+
+
+def _stock_meta_str(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value:
+            return str(value).strip().upper()
+    return None
+
+
+def _stock_meta_float(metadata: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            return float(value)
+    return None
 
 
 @dataclass
@@ -243,9 +309,51 @@ class LiveEventService:
             await self._refresh_polymarket_snapshot(event)
         elif event.source == LiveEventSource.KALSHI:
             await self._refresh_kalshi_snapshot(event)
+        elif event.source == LiveEventSource.SP500_DYNAMIC:
+            await self._refresh_sp500_snapshot(event)
+
+    async def _refresh_sp500_snapshot(self, event: LiveEvent) -> None:
+        """Ensure the Alpaca quote bridge is subscribed for this event's ticker.
+
+        Probability odds stay LMSR-driven; underlying equity price is streamed
+        separately as ``stock_quote`` messages.
+
+        Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+        """
+        ticker = (event.stock_ticker or "").strip().upper()
+        if not ticker:
+            return
+        try:
+            from services.alpaca_quote_bridge import get_alpaca_quote_bridge
+
+            await get_alpaca_quote_bridge().touch_ticker(ticker)
+        except Exception:  # noqa: BLE001
+            logger.debug("Alpaca quote bridge unavailable for %s", ticker, exc_info=True)
+
+    async def record_view(self, event_id: str) -> LiveEvent | None:
+        """Record a card view and subscribe Alpaca IEX for sp500_dynamic tickers."""
+        from services.live_feed_analytics import analytics
+
+        event = await self._resolve_event(event_id)
+        if event is None:
+            return None
+
+        ticker = (event.stock_ticker or "").strip().upper() or None
+        analytics.record_event_view(event.id, stock_ticker=ticker)
+
+        if event.source == LiveEventSource.SP500_DYNAMIC and ticker:
+            await self._refresh_sp500_snapshot(event)
+
+        return event
 
     def _count_by_source(self, events: list[LiveEvent]) -> dict[str, int]:
-        counts = {"internal": 0, "polymarket": 0, "kalshi": 0, "external": 0}
+        counts = {
+            "internal": 0,
+            "polymarket": 0,
+            "kalshi": 0,
+            "sp500_dynamic": 0,
+            "external": 0,
+        }
         for event in events:
             key = event.source.value
             if key in counts:
@@ -322,6 +430,16 @@ class LiveEventService:
                 volume=snapshot.volume,
                 volume_24h=snapshot.volume_24h,
                 change_24h=snapshot.change_24h,
+                stock_ticker=_stock_meta_str(snapshot.metadata, "stock_ticker", "stockTicker"),
+                strike_price=_stock_meta_float(snapshot.metadata, "strike_price", "strikePrice"),
+                expiration_type=_coerce_expiration_type(
+                    snapshot.metadata.get("expiration_type")
+                    or snapshot.metadata.get("expirationType")
+                ),
+                expiration_date=_coerce_expiration_date(
+                    snapshot.metadata.get("expiration_date")
+                    or snapshot.metadata.get("expirationDate")
+                ),
             )
             self.db.add(event)
             await self.db.commit()
@@ -354,6 +472,22 @@ class LiveEventService:
         event.volume = snapshot.volume
         event.volume_24h = snapshot.volume_24h
         event.change_24h = snapshot.change_24h
+        ticker = _stock_meta_str(snapshot.metadata, "stock_ticker", "stockTicker")
+        if ticker:
+            event.stock_ticker = ticker
+        strike = _stock_meta_float(snapshot.metadata, "strike_price", "strikePrice")
+        if strike is not None:
+            event.strike_price = strike
+        exp_type = _coerce_expiration_type(
+            snapshot.metadata.get("expiration_type") or snapshot.metadata.get("expirationType")
+        )
+        if exp_type is not None:
+            event.expiration_type = exp_type
+        exp_date = _coerce_expiration_date(
+            snapshot.metadata.get("expiration_date") or snapshot.metadata.get("expirationDate")
+        )
+        if exp_date is not None:
+            event.expiration_date = exp_date
 
         prob_changed = before_probs != probabilities
         status_changed = before_status != event.status.value

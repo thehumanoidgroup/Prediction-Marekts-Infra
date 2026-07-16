@@ -51,9 +51,20 @@ class MarketRuntime:
     closes_at: int = 0
     history: list[dict[str, float | int]] = field(default_factory=list)
     change_24h: float = 0.0
+    # Multi-provider metadata (defaults keep seeded LMSR markets as internal).
+    source: str = "internal"
+    stock_ticker: str | None = None
+    strike_price: float | None = None
+    expiration_type: str | None = None
+    expiration_date: str | None = None
+    resolved_outcome: str | None = None  # "yes" | "no" once settled
 
     @property
     def yes_price(self) -> float:
+        if self.resolved_outcome == "yes":
+            return 0.97
+        if self.resolved_outcome == "no":
+            return 0.03
         return _clamp_price(self.maker.prices()[0])
 
     def append_history(self, ts: int | None = None) -> None:
@@ -71,6 +82,7 @@ class TraderSession:
     risk: RiskEngine
     provider: str = "internal"
     kalshi_market_tickers: list[str] = field(default_factory=list)
+    sp500_tickers: list[str] = field(default_factory=list)
     demo_account_id: str | None = None
     external_markets: dict[str, dict] = field(default_factory=dict)
     journal: list[JournalRecord] = field(default_factory=list)
@@ -120,7 +132,68 @@ class TradingStore:
                 traders=int(120 + seed.volume_scale * 50),
                 closes_at=ts + seed.days_to_close * DAY_MS,
                 history=history,
+                source="internal",
             )
+
+    def create_market(
+        self,
+        *,
+        market_id: str,
+        question: str,
+        category: str,
+        base_price: float,
+        closes_at: int,
+        volume_scale: float = 1.0,
+        source: str = "internal",
+        stock_ticker: str | None = None,
+        strike_price: float | None = None,
+        expiration_type: str | None = None,
+        expiration_date: str | None = None,
+        liquidity: float = 400.0,
+    ) -> tuple[MarketRuntime, bool]:
+        """Create an LMSR market or return the existing one (idempotent).
+
+        Returns ``(market, created)`` where ``created`` is False when
+        ``market_id`` was already present.
+        """
+        with self._lock:
+            existing = self._markets.get(market_id)
+            if existing is not None:
+                return existing, False
+
+            maker = LMSRMarketMaker(
+                LMSRConfig(num_outcomes=2, liquidity=liquidity, fee_rate=0.01)
+            )
+            target = _clamp_price(base_price)
+            for _ in range(24):
+                current = maker.prices()[0]
+                if abs(current - target) < 0.015:
+                    break
+                if current < target:
+                    maker.execute_buy(0, 40)
+                else:
+                    maker.execute_buy(1, 40)
+
+            ts = now_ms()
+            history = [{"t": ts - (11 - i) * HOUR_MS, "p": target} for i in range(12)]
+            runtime = MarketRuntime(
+                seed_id=market_id,
+                question=question,
+                category=category,
+                maker=maker,
+                volume=volume_scale * 900_000,
+                volume_24h=volume_scale * 50_000,
+                traders=int(120 + volume_scale * 50),
+                closes_at=closes_at,
+                history=history,
+                source=source,
+                stock_ticker=stock_ticker,
+                strike_price=strike_price,
+                expiration_type=expiration_type,
+                expiration_date=expiration_date,
+            )
+            self._markets[market_id] = runtime
+            return runtime, True
 
     def market_prices(self) -> dict[str, list[float]]:
         with self._lock:
@@ -164,6 +237,7 @@ class TradingStore:
         *,
         provider: str = "internal",
         kalshi_market_tickers: list[str] | None = None,
+        sp500_tickers: list[str] | None = None,
         demo_account_id: str | None = None,
     ) -> TraderSession:
         key = (tenant_slug, user_id)
@@ -195,6 +269,7 @@ class TradingStore:
                 risk=risk,
                 provider=provider,
                 kalshi_market_tickers=list(kalshi_market_tickers or []),
+                sp500_tickers=list(sp500_tickers or []),
                 demo_account_id=demo_account_id,
                 day_open_equity=starting,
             )
@@ -216,6 +291,7 @@ class TradingStore:
         *,
         provider: str = "internal",
         kalshi_market_tickers: list[str] | None = None,
+        sp500_tickers: list[str] | None = None,
         demo_account_id: str | None = None,
     ) -> TraderSession:
         """Replace an existing in-memory session (e.g. after re-provisioning)."""
@@ -228,6 +304,7 @@ class TradingStore:
             program,
             provider=provider,
             kalshi_market_tickers=kalshi_market_tickers,
+            sp500_tickers=sp500_tickers,
             demo_account_id=demo_account_id,
         )
 
@@ -259,6 +336,63 @@ class TradingStore:
         with self._lock:
             return self._markets.get(market_id)
 
+    def iter_sessions(self) -> list[TraderSession]:
+        with self._lock:
+            return list(self._sessions.values())
+
+    def settle_market_all_sessions(
+        self,
+        market_id: str,
+        winning_outcome: int,
+    ) -> list[tuple[tuple[str, str], list]]:
+        """Pay out every trader session holding the market via VirtualBankroll.settle_market.
+
+        ``winning_outcome``: ``0`` = Yes, ``1`` = No.
+        Returns ``[((tenant_slug, user_id), ledger_entries), ...]``.
+        """
+        outcome_label = "yes" if winning_outcome == 0 else "no"
+        settled: list[tuple[tuple[str, str], list]] = []
+        market_question = market_id
+
+        with self._lock:
+            market = self._markets.get(market_id)
+            if market is not None:
+                market.resolved_outcome = outcome_label
+                # Force serializer status to resolved.
+                market.closes_at = min(market.closes_at or now_ms(), now_ms())
+                market_question = market.question
+
+            sessions = list(self._sessions.values())
+
+        for session in sessions:
+            with session._lock:
+                entries = session.bankroll.settle_market(market_id, winning_outcome)
+                if not entries:
+                    continue
+                prices = self.market_prices_for_session(session)
+                snap = session.bankroll.mark_to_market(prices)
+                session.risk.on_equity(snap.equity, traded=True)
+                session.record_equity(prices)
+                session.journal.append(
+                    JournalRecord(
+                        id=str(uuid.uuid4()),
+                        kind="trade",
+                        market_id=market_id,
+                        market_question=market_question,
+                        outcome=outcome_label,
+                        side=None,
+                        shares=None,
+                        price=1.0 if winning_outcome == 0 else 0.0,
+                        pnl=sum(float(e.amount) for e in entries),
+                        note=f"Market resolved {outcome_label.upper()}",
+                        tags=["settlement", "sp500_dynamic"],
+                        executed_at=now_ms(),
+                    )
+                )
+                settled.append(((session.tenant_slug, session.user_id), entries))
+
+        return settled
+
     def sync_session_risk(self, session: TraderSession) -> list:
         """Re-mark open positions and run real-time drawdown / daily-loss checks."""
         with session._lock:
@@ -278,7 +412,16 @@ class TradingStore:
         yes_price: float | None = None,
     ) -> float:
         outcome_idx = 0 if outcome == "yes" else 1
-        if market_id.lower().startswith("kalshi-") or market_id in session.external_markets:
+        external_priced = (
+            market_id.lower().startswith("kalshi-")
+            or market_id.lower().startswith("sp500-")
+            or market_id in session.external_markets
+        )
+        if external_priced and (
+            market_id.lower().startswith("kalshi-")
+            or market_id in session.external_markets
+            or self.get_market(market_id) is None
+        ):
             clamped = _clamp_price(float(yes_price if yes_price is not None else 0.5))
             fill_price = clamped if outcome_idx == 0 else (1.0 - clamped)
             gross = fill_price * shares
@@ -573,7 +716,13 @@ class TradingStore:
                 "question": market_question,
                 "category": category,
                 "yesPrice": yes_price,
-                "source": "kalshi" if market_id.startswith("kalshi-") else "external",
+                "source": (
+                    "kalshi"
+                    if market_id.startswith("kalshi-")
+                    else "sp500_dynamic"
+                    if market_id.startswith("sp500-")
+                    else "external"
+                ),
             }
 
             prices = self.market_prices_for_session(session)
@@ -595,7 +744,13 @@ class TradingStore:
                     price=fill_price,
                     pnl=None,
                     note="",
-                    tags=["kalshi"] if market_id.startswith("kalshi-") else ["external"],
+                    tags=(
+                        ["kalshi"]
+                        if market_id.startswith("kalshi-")
+                        else ["sp500_dynamic"]
+                        if market_id.startswith("sp500-")
+                        else ["external"]
+                    ),
                     executed_at=now_ms(),
                 ),
             )

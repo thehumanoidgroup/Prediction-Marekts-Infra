@@ -77,6 +77,10 @@ export interface ProvisionNewAccountInput {
   modelType: PropFirmModelType;
   accountSize: AccountSize;
   purchasedAt?: Date;
+  /** Market data provider for the issued evaluation account. */
+  provider?: "internal" | "polymarket" | "kalshi" | "sp500_dynamic";
+  /** S&P 500 ticker allowlist when provider = sp500_dynamic. */
+  sp500Tickers?: string[];
   /** Prop firm JSON overrides merged into default rules. */
   customRules?: Record<string, unknown>;
   /** Explicit partial overrides on top of resolved defaults. */
@@ -252,6 +256,17 @@ export async function provisionNewAccount(
 
     const virtualBalance = defaultVirtualBalance(data.accountSize);
     const now = new Date();
+    const provider = input.provider ?? "internal";
+    const sp500Tickers =
+      provider === "sp500_dynamic"
+        ? (input.sp500Tickers ?? []).map((t) => t.toUpperCase()).filter(Boolean)
+        : [];
+
+    const otherCustomRules = {
+      ...((challengeConfig.otherCustomRules ?? {}) as Record<string, unknown>),
+      provider,
+      ...(sp500Tickers.length ? { sp500Tickers } : {}),
+    };
 
     // Step 1–2: Create account shell, challenge config, and encrypted credentials.
   const row = await prisma.$transaction(async (tx) => {
@@ -263,6 +278,7 @@ export async function provisionNewAccount(
         accountSize: fromApiAccountSize(data.accountSize),
         purchasedAt: data.purchasedAt ?? now,
         status: "pending",
+        provider,
         challengeConfig: {
           create: {
             profitTarget: challengeConfig.profitTarget,
@@ -271,8 +287,9 @@ export async function provisionNewAccount(
             maxBetSizeValue: challengeConfig.maxBetSizeValue,
             maxBetSizeMode: fromApiMaxBetMode(challengeConfig.maxBetSizeMode ?? "percent"),
             consistencyScore: challengeConfig.consistencyScore ?? null,
-            otherCustomRules: (challengeConfig.otherCustomRules ??
-              {}) as Prisma.InputJsonValue,
+            provider,
+            sp500Tickers: sp500Tickers.length ? sp500Tickers : undefined,
+            otherCustomRules: otherCustomRules as Prisma.InputJsonValue,
           },
         },
       },
@@ -298,6 +315,7 @@ export async function provisionNewAccount(
         challengeConfigId: account.challengeConfig.id,
         virtualBalance,
         loginCredentials: encrypted,
+        provider,
       },
     });
 

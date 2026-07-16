@@ -6,6 +6,7 @@ const sourceStyles: Record<LiveEventSource, string> = {
   internal: "bg-accent-soft text-accent",
   polymarket: "bg-[#6366f1]/15 text-[#a5b4fc]",
   kalshi: "bg-[#22c55e]/15 text-[#86efac]",
+  sp500_dynamic: "bg-[#0ea5e9]/15 text-[#7dd3fc]",
   external: "bg-orange-500/15 text-orange-300",
 };
 
@@ -13,7 +14,16 @@ const sourceLabels: Record<LiveEventSource, string> = {
   internal: "Internal",
   polymarket: "Polymarket",
   kalshi: "Kalshi",
+  sp500_dynamic: "S&P 500",
   external: "External",
+};
+
+const compactLabels: Record<LiveEventSource, string> = {
+  internal: "LMSR",
+  polymarket: "Poly",
+  kalshi: "Kalshi",
+  sp500_dynamic: "SPX",
+  external: "Ext",
 };
 
 export function MarketSourceBadge({
@@ -27,7 +37,7 @@ export function MarketSourceBadge({
 }) {
   return (
     <Badge className={cn(sourceStyles[source], className)}>
-      {compact ? (source === "internal" ? "LMSR" : source === "polymarket" ? "Poly" : source === "kalshi" ? "Kalshi" : "Ext") : sourceLabels[source]}
+      {compact ? compactLabels[source] : sourceLabels[source]}
     </Badge>
   );
 }

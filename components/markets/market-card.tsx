@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect } from "react";
 import type { Market } from "@/lib/types";
 import { formatCompactUsd, formatTimeUntil } from "@/lib/format";
 import { MarketSourceBadge } from "@/components/markets/market-source-badge";
@@ -6,9 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { IconClock, IconUsers } from "@/components/ui/icons";
 import { Sparkline } from "@/components/ui/sparkline";
-import { LiveProbability } from "@/components/markets/live-price";
+import { LiveProbability, LiveStockQuote } from "@/components/markets/live-price";
 import { LiveProbabilityBar } from "@/components/markets/live-probability-bar";
 import { MarketCardActions } from "@/components/markets/market-card-actions";
+import { useRegisterViewedTicker } from "@/lib/live-prices";
 import { cn } from "@/lib/utils";
 
 const categoryLabels: Record<Market["category"], string> = {
@@ -35,6 +39,13 @@ const categoryAccent: Record<Market["category"], string> = {
 
 export function MarketCard({ market }: { market: Market }) {
   const up = market.change24h >= 0;
+  const registerTicker = useRegisterViewedTicker();
+  const isSp500 = market.source === "sp500_dynamic";
+  const ticker = market.stockTicker;
+
+  useEffect(() => {
+    if (isSp500 && ticker) registerTicker(ticker);
+  }, [isSp500, ticker, registerTicker]);
 
   return (
     <Card
@@ -49,6 +60,11 @@ export function MarketCard({ market }: { market: Market }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge>{categoryLabels[market.category]}</Badge>
             <MarketSourceBadge source={market.source} compact />
+            {isSp500 && ticker ? (
+              <Badge tone="neutral" className="font-semibold tracking-wide">
+                {ticker}
+              </Badge>
+            ) : null}
           </div>
           <div className="flex items-center gap-1.5">
             {market.status === "closing_soon" ? <Badge tone="warn">Closing soon</Badge> : null}
@@ -69,21 +85,44 @@ export function MarketCard({ market }: { market: Market }) {
         </h3>
 
         <div className="mt-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
-            YES probability
-          </p>
-          <div className="mt-1 flex items-end justify-between gap-3">
-            <LiveProbability
-              marketId={market.id}
-              initialPrice={market.yesPrice}
-              className="text-3xl font-bold tracking-tight sm:text-[2rem]"
-            />
-            <Sparkline
-              data={market.history.slice(-30)}
-              width={96}
-              height={36}
-              positive={up}
-            />
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
+                YES probability
+              </p>
+              <LiveProbability
+                marketId={market.id}
+                initialPrice={market.yesPrice}
+                className="mt-1 text-3xl font-bold tracking-tight sm:text-[2rem]"
+              />
+            </div>
+            {isSp500 && ticker ? (
+              <div className="text-right">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">
+                  {ticker} last
+                </p>
+                <LiveStockQuote
+                  ticker={ticker}
+                  className="mt-1 text-xl font-semibold tracking-tight text-foreground"
+                />
+                {market.strikePrice != null ? (
+                  <p className="mt-0.5 text-[11px] text-muted">
+                    Strike $
+                    {market.strikePrice.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <Sparkline
+                data={market.history.slice(-30)}
+                width={96}
+                height={36}
+                positive={up}
+              />
+            )}
           </div>
           <LiveProbabilityBar marketId={market.id} initialPrice={market.yesPrice} className="mt-3" size="sm" />
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useFeedStatus, useLivePrice } from "@/lib/live-prices";
+import { useFeedStatus, useLivePrice, useLiveStockPrice } from "@/lib/live-prices";
 import { formatCents } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,45 @@ export function LiveProbability({
       )}
     >
       {Math.round(price * 100)}%
+    </span>
+  );
+}
+
+/** Live underlying equity last price for S&P 500 dynamic market cards. */
+export function LiveStockQuote({
+  ticker,
+  className,
+}: {
+  ticker: string;
+  className?: string;
+}) {
+  const status = useFeedStatus();
+  const price = useLiveStockPrice(ticker);
+  const flash = useFlash(price ?? 0);
+
+  if (price == null) {
+    return (
+      <span className={cn("tabular text-faint", className)}>
+        {status === "connecting" ? "…" : "—"}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      key={flash.key}
+      className={cn(
+        "tabular",
+        flash.direction === "up" && "animate-flash-up",
+        flash.direction === "down" && "animate-flash-down",
+        className,
+      )}
+    >
+      $
+      {price.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}
     </span>
   );
 }

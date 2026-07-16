@@ -30,7 +30,7 @@ export async function listHybridMarkets(
 ): Promise<{
   markets: Market[];
   source: MarketViewSource;
-  counts: { internal: number; polymarket: number; kalshi: number };
+  counts: { internal: number; polymarket: number; kalshi: number; sp500_dynamic: number };
 }> {
   const source = filters.source ?? "all";
   const { category = "all", query = "", sort = "volume", refresh = false } = filters;
@@ -70,6 +70,19 @@ export async function listHybridMarkets(
     }
   }
 
+  if (source === "sp500_dynamic" || source === "all") {
+    try {
+      const { searchSp500Markets, getActiveSp500Markets } = await import("@/lib/sp500/service");
+      const sp500 =
+        source === "sp500_dynamic" && query.trim()
+          ? await searchSp500Markets(query, refresh)
+          : await getActiveSp500Markets(refresh);
+      markets.push(...sp500);
+    } catch {
+      /* S&P 500 generator unavailable — continue with other sources */
+    }
+  }
+
   if (source === "all") {
     if (category !== "all") {
       markets = markets.filter((market) => market.category === category);
@@ -79,13 +92,17 @@ export async function listHybridMarkets(
       markets = markets.filter((market) => market.question.toLowerCase().includes(needle));
     }
     markets = sortMarkets(markets, sort);
-  } else if (source === "polymarket" || source === "kalshi") {
+  } else if (source === "polymarket" || source === "kalshi" || source === "sp500_dynamic") {
     if (category !== "all") {
       markets = markets.filter((market) => market.category === category);
     }
-    if (query.trim() && source === "polymarket") {
+    if (query.trim() && (source === "polymarket" || source === "sp500_dynamic")) {
       const needle = query.trim().toLowerCase();
-      markets = markets.filter((market) => market.question.toLowerCase().includes(needle));
+      markets = markets.filter(
+        (market) =>
+          market.question.toLowerCase().includes(needle) ||
+          (market.stockTicker?.toLowerCase().includes(needle) ?? false),
+      );
     }
     markets = sortMarkets(markets, sort);
   }
@@ -94,6 +111,7 @@ export async function listHybridMarkets(
     internal: markets.filter((market) => market.source === "internal").length,
     polymarket: markets.filter((market) => market.source === "polymarket").length,
     kalshi: markets.filter((market) => market.source === "kalshi").length,
+    sp500_dynamic: markets.filter((market) => market.source === "sp500_dynamic").length,
   };
 
   return { markets, source, counts };
@@ -110,6 +128,11 @@ export async function getHybridMarket(marketId: string): Promise<Market | null> 
   if (marketId.toLowerCase().startsWith("kalshi-")) {
     const { getKalshiMarketById } = await import("@/lib/kalshi/service");
     return getKalshiMarketById(marketId);
+  }
+
+  if (marketId.toLowerCase().startsWith("sp500-")) {
+    const { getSp500MarketById } = await import("@/lib/sp500/service");
+    return getSp500MarketById(marketId);
   }
 
   return null;

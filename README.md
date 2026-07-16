@@ -78,6 +78,7 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/polymarket/markets` | GET | Polymarket CLOB listings |
 | `/api/polymarket/search` | GET | Search Polymarket markets |
 | `/api/platform/integrations/polymarket` | GET | Polymarket integration health |
+| `/api/platform/integrations/alpaca` | GET | Alpaca Market Data (IEX) health |
 | `/api/kalshi/status` | GET | Kalshi integration health |
 | `/api/orders/preview` | POST | Pre-trade risk check |
 | `/api/admin/accounts/provision` | POST | Firm admin Kalshi demo issuance |
@@ -159,6 +160,44 @@ Kalshi market listings and demo account issuance run **in the same Next.js deplo
 - **Purchase webhook** — `POST /api/provisioning/webhook` with `custom_rules.provider: "kalshi"` if desired
 
 Optional env vars: `PP_KALSHI_BASE_URL`, `PP_KALSHI_API_KEY`, `PP_KALSHI_API_SECRET`, `KALSHI_CACHE_TTL_SECONDS`.
+
+## S&P 500 Stock Prediction Markets (0DTE & Weekly) – MVP
+
+PropPredict can provision evaluation accounts against **dynamically generated S&P 500 stock prediction markets** (same-day 0DTE and weekly strikes). Traders bet Yes/No on whether a name closes above a strike; P&L is **virtual only** and flows through the same challenge risk engine as Kalshi/internal markets.
+
+| Piece | Location |
+| --- | --- |
+| Market provider | `provider = "sp500_dynamic"` on challenge configs / sold accounts |
+| Spot + bars (MVP) | [Alpaca Market Data IEX](https://alpaca.markets/docs/api-references/market-data-api/) — paper keys |
+| Generator | `backend/services/sp500_market_generator.py`, `lib/sp500/` |
+| Live quotes | Alpaca REST (viewed tickers) + optional IEX WebSocket bridge |
+| EOD resolution | `backend/services/sp500_resolution_service.py` (daily close → settle LMSR) |
+| Trader UI | Dashboard **S&P 500 Markets** section |
+| Admin | Issue New Account → provider **S&P 500 Dynamic**; Sold Accounts filter/badge |
+| Analytics | Super Admin overview — most-traded underlyings |
+
+**Flow:** purchase/webhook or admin issue (`provider=sp500_dynamic`) → ticker allowlist on the demo session → live `sp500-{TICKER}-{0dte\|weekly}-…` markets → stake/exposure rules enforced → EOD resolve.
+
+Env (paper keys recommended for MVP):
+
+```bash
+ALPACA_API_KEY=PK...
+ALPACA_SECRET_KEY=...
+# Optional: PP_ALPACA_FEED=iex  PP_ALPACA_WS_MAX_SYMBOLS=30
+```
+
+See `backend/integrations/alpaca/README.md` for free-key setup and endpoint links.
+
+> **Scaling note:** Alpaca IEX is for the MVP. **Polygon.io will replace Alpaca when scaling many accounts** (full SIP, higher rate limits).
+
+## Alpaca integration (S&P 500 / IEX)
+
+Optional Python package at `backend/integrations/alpaca/` plus the Next.js path in `lib/sp500/`:
+
+- REST + WebSocket client (`AlpacaClient`, `AlpacaStockStream`)
+- Redis-cached service façade (`AlpacaService`)
+- Super Admin health: `/platform/integrations` and `GET /api/platform/integrations/alpaca`
+- Docs: https://alpaca.markets/docs/ · https://alpaca.markets/docs/api-references/market-data-api/
 
 ## License
 

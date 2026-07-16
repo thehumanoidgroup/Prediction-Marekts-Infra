@@ -18,6 +18,7 @@ import { EquityChart } from "@/components/charts/equity-chart";
 import { ChallengePanel } from "@/components/dashboard/challenge-panel";
 import { LiveEventsSection } from "@/components/live-events/live-events-section";
 import { KalshiMarketsSection } from "@/components/dashboard/kalshi-markets-section";
+import { Sp500MarketsSection } from "@/components/dashboard/sp500-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { LivePositionsTable } from "@/components/dashboard/live-positions";
@@ -202,6 +203,7 @@ export function DashboardClient({
           <JournalCard entries={journalEntries} />
 
           {account.provider === "kalshi" ? <KalshiMarketsSection /> : null}
+          {account.provider === "sp500_dynamic" ? <Sp500MarketsSection /> : null}
 
           <LiveEventsSection />
         </div>

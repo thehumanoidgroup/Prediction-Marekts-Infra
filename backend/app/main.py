@@ -14,6 +14,9 @@ from app.ws.manager import manager
 from app.ws.ticker import start_ticker, stop_ticker
 from realtime.update_batcher import batcher
 from tasks.live_data_ingestion import start_live_data_ingestion, stop_live_data_ingestion
+from tasks.sp500_market_generation import start_sp500_market_generator, stop_sp500_market_generator
+from tasks.sp500_market_resolution import start_sp500_market_resolution, stop_sp500_market_resolution
+from services.alpaca_quote_bridge import start_alpaca_quote_bridge, stop_alpaca_quote_bridge
 
 logging.basicConfig(level=logging.INFO)
 
@@ -34,7 +37,15 @@ async def lifespan(app: FastAPI):
     await batcher.startup()
     ticker = start_ticker()
     ingestion = start_live_data_ingestion()
+    # Alpaca used for MVP. Will switch to Polygon for scale.
+    sp500_task = start_sp500_market_generator(settings)
+    # Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+    await start_alpaca_quote_bridge(settings)
+    resolution_task = start_sp500_market_resolution(settings)
     yield
+    await stop_sp500_market_resolution(resolution_task)
+    await stop_alpaca_quote_bridge()
+    await stop_sp500_market_generator(sp500_task)
     await stop_live_data_ingestion(ingestion)
     await stop_ticker(ticker)
     await batcher.shutdown()
