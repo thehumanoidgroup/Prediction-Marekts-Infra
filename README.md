@@ -160,6 +160,16 @@ Kalshi market listings and demo account issuance run **in the same Next.js deplo
 
 Optional env vars: `PP_KALSHI_BASE_URL`, `PP_KALSHI_API_KEY`, `PP_KALSHI_API_SECRET`, `KALSHI_CACHE_TTL_SECONDS`.
 
+## Alpaca integration (S&P 500 / IEX)
+
+Optional Python backend package at `backend/integrations/alpaca/` for free-tier IEX stock data:
+
+- REST + WebSocket client (`AlpacaClient`, `AlpacaStockStream`)
+- Redis-cached service façade (`AlpacaService`)
+- Env: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` (paper keys for MVP)
+
+Docs: https://alpaca.markets/docs/api-references/market-data-api/ — replace with Polygon.io when scaling.
+
 ## License
 
 Proprietary — thehumanoidgroup
