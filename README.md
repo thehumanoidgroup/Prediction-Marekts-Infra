@@ -57,9 +57,12 @@ Super Admin: `super@proppredict.demo`
 
 1. Import this GitHub repository into Vercel
 2. Set environment variables from `.env.example` (at minimum `SECRET_KEY` and `DATABASE_URL`)
-3. Deploy — no additional backend service required
+3. Run `npx prisma db push` against that database (or rely on your migrate workflow) so `trader_portfolios` exists
+4. Deploy — no additional backend service required
 
 Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-postgres) or [Neon](https://neon.tech) for `DATABASE_URL`.
+
+Trader virtual bets (internal, Polymarket, Kalshi) persist in `TraderPortfolio` so fills survive serverless cold starts and show on Dashboard / Portfolio.
 
 ## API overview
 

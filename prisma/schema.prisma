@@ -190,6 +190,29 @@ model TraderDemoAccount {
   @@map("trader_demo_accounts")
 }
 
+/// Durable per-tenant (demo) trader portfolio — survives Vercel cold starts.
+model TraderPortfolio {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  /// Scope until trading routes are fully user-authenticated (`default` = firm demo book).
+  scopeKey  String   @default("default") @map("scope_key")
+  balance   Decimal  @map("balance") @db.Decimal(14, 2)
+  equity    Decimal  @map("equity") @db.Decimal(14, 2)
+  positions Json     @default("[]")
+  orders    Json     @default("[]")
+  journal   Json     @default("[]")
+  /// ChallengeAccount snapshot (equity curve, objectives, labels, …).
+  account   Json     @default("{}")
+  /// External markets referenced by open positions (Polymarket / Kalshi).
+  markets   Json     @default("[]")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, scopeKey])
+  @@index([tenantId])
+  @@map("trader_portfolios")
+}
+
 /// Durable Super Admin activity feed (provisioning, onboarding, etc.).
 model PlatformActivityLog {
   id         String   @id @default(uuid())

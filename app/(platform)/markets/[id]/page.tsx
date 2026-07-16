@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { getHybridMarket } from "@/lib/hybrid-markets";
+import { hydrateTenantPortfolio } from "@/lib/portfolio-persistence";
 import { getRequestTenant } from "@/lib/tenant-server";
-import { getAccount, getMarket, getPositions } from "@/lib/services";
+import { getAccount, getPositions } from "@/lib/services";
 import {
   formatCents,
   formatCompactUsd,
@@ -25,7 +27,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const market = getMarket(id);
+  const market = await getHybridMarket(id);
   return { title: market?.question ?? "Market" };
 }
 
@@ -35,10 +37,11 @@ export default async function MarketDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const market = getMarket(id);
+  const market = await getHybridMarket(id);
   if (!market) notFound();
 
   const tenant = await getRequestTenant();
+  await hydrateTenantPortfolio(tenant.id);
   const account = getAccount(tenant.id);
   const positions = getPositions(tenant.id).filter((p) => p.marketId === market.id);
   const up = market.change24h >= 0;

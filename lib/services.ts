@@ -1,9 +1,11 @@
 import {
   createGlobalMarketTemplate,
   createMarketFromTemplate,
+  ensureExternalMarket,
   getAdminTraders as storeAdminTraders,
   getLeaderboard,
   getPlatformAnalyticsSeries,
+  getRegisteredMarket,
   getStore,
   getTenantOverrides,
   getTenantState,
@@ -83,30 +85,33 @@ export function listMarkets(filters: MarketFilters = {}): Market[] {
 }
 
 export function getMarket(id: string): Market | null {
-  return getStore().markets.find((m) => m.id === id) ?? null;
+  return getRegisteredMarket(id);
 }
 
 export function getAccount(tenantId: string): ChallengeAccount {
-  return getTenantState(tenantId).account;
+  return syncAccountMetrics(tenantId);
 }
 
 export function getPositions(tenantId: string): EnrichedPosition[] {
   const state = getTenantState(tenantId);
-  return state.positions.map((pos) => {
-    const market = getMarket(pos.marketId)!;
+  return state.positions.flatMap((pos) => {
+    const market = getMarket(pos.marketId);
+    if (!market) return [];
     const currentPrice = pos.outcome === "yes" ? market.yesPrice : 1 - market.yesPrice;
     const value = currentPrice * pos.shares;
     const cost = pos.avgPrice * pos.shares;
     const pnl = value - cost;
-    return {
-      ...pos,
-      market,
-      currentPrice,
-      value,
-      cost,
-      pnl,
-      pnlPct: cost > 0 ? (pnl / cost) * 100 : 0,
-    };
+    return [
+      {
+        ...pos,
+        market,
+        currentPrice,
+        value,
+        cost,
+        pnl,
+        pnlPct: cost > 0 ? (pnl / cost) * 100 : 0,
+      },
+    ];
   });
 }
 
@@ -118,12 +123,40 @@ export function getTenantLeaderboard(tenantId: string): LeaderboardEntry[] {
   return getLeaderboard(tenantId);
 }
 
+function syncAccountMetrics(tenantId: string): ChallengeAccount {
+  const state = getTenantState(tenantId);
+  const positions = getPositions(tenantId);
+  const openPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+  const equity = state.account.balance + openPnl;
+  const totalPnl = equity - state.account.startingBalance;
+  const prevClose =
+    state.account.equityCurve.length > 1
+      ? state.account.equityCurve[state.account.equityCurve.length - 2].p
+      : state.account.startingBalance;
+
+  state.account.equity = Number(equity.toFixed(2));
+  state.account.totalPnl = Number(totalPnl.toFixed(2));
+  state.account.dailyPnl = Number((equity - prevClose).toFixed(2));
+
+  const lastPoint = state.account.equityCurve[state.account.equityCurve.length - 1];
+  const now = Date.now();
+  if (!lastPoint || now - lastPoint.t > 60_000) {
+    state.account.equityCurve.push({ t: now, p: Math.round(equity) });
+  } else {
+    lastPoint.p = Math.round(equity);
+  }
+
+  return state.account;
+}
+
 export function getPortfolioSummary(tenantId: string): PortfolioSummary {
-  const { account, journal } = getTenantState(tenantId);
+  const { journal } = getTenantState(tenantId);
+  const account = syncAccountMetrics(tenantId);
   const positions = getPositions(tenantId);
   const openPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
 
-  const closed = journal.filter((j) => j.pnl !== null);
+  const tradeJournal = journal.filter((j) => j.kind === "trade");
+  const closed = tradeJournal.filter((j) => j.pnl !== null);
   const wins = closed.filter((j) => (j.pnl ?? 0) > 0);
   const losses = closed.filter((j) => (j.pnl ?? 0) < 0);
   const grossWin = wins.reduce((s, j) => s + (j.pnl ?? 0), 0);
@@ -140,7 +173,7 @@ export function getPortfolioSummary(tenantId: string): PortfolioSummary {
     dailyPnl: account.dailyPnl,
     totalPnl: account.totalPnl,
     winRate: closed.length ? (wins.length / closed.length) * 100 : 0,
-    totalTrades: closed.length,
+    totalTrades: tradeJournal.length,
     avgWin: wins.length ? grossWin / wins.length : 0,
     avgLoss: losses.length ? grossLoss / losses.length : 0,
     profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0,
@@ -154,31 +187,48 @@ export interface PlaceOrderInput {
   outcome: Outcome;
   side: "buy" | "sell";
   shares: number;
+  /** Optional market snapshot for Polymarket / Kalshi virtual fills. */
+  market?: Market;
+  /** Optional YES price override from the live client tick. */
+  yesPrice?: number;
 }
 
 export interface PlaceOrderResult {
   order: Order;
-  position: Position;
+  position: Position | null;
+  account: ChallengeAccount;
 }
 
 /**
  * Fills an order at the current market price and updates the tenant's
  * position (weighted-average entry on buys, share reduction on sells).
+ * Supports internal LMSR markets and virtual Polymarket / Kalshi bets.
  */
 export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrderResult {
-  const market = getMarket(input.marketId);
+  let market = input.market ?? getMarket(input.marketId);
   if (!market) throw new Error(`Unknown market: ${input.marketId}`);
+  if (market.source !== "internal") {
+    market = ensureExternalMarket(market);
+  }
   if (market.status === "resolved") throw new Error("Market is resolved");
   if (!Number.isFinite(input.shares) || input.shares <= 0) {
     throw new Error("Shares must be a positive number");
   }
 
   const state = getTenantState(tenantId);
-  const price = input.outcome === "yes" ? market.yesPrice : 1 - market.yesPrice;
+  const yesPrice =
+    typeof input.yesPrice === "number" && Number.isFinite(input.yesPrice)
+      ? Math.min(0.97, Math.max(0.03, input.yesPrice))
+      : market.yesPrice;
+  if (market.source !== "internal") {
+    market.yesPrice = yesPrice;
+    ensureExternalMarket(market);
+  }
+  const price = input.outcome === "yes" ? yesPrice : 1 - yesPrice;
   const shares = Math.floor(input.shares);
 
   const order: Order = {
-    id: `ord-${tenantId}-${state.orders.length + 1}`,
+    id: `ord-${tenantId}-${Date.now()}-${state.orders.length + 1}`,
     marketId: market.id,
     outcome: input.outcome,
     side: input.side,
@@ -187,9 +237,8 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
     filledAt: Date.now(),
   };
 
-  let position = state.positions.find(
-    (p) => p.marketId === market.id && p.outcome === input.outcome,
-  );
+  let position =
+    state.positions.find((p) => p.marketId === market!.id && p.outcome === input.outcome) ?? null;
 
   if (input.side === "buy") {
     const cost = shares * price;
@@ -200,7 +249,7 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
       position.avgPrice = totalCost / position.shares;
     } else {
       position = {
-        id: `pos-${tenantId}-${state.positions.length + 1}`,
+        id: `pos-${tenantId}-${Date.now()}-${state.positions.length + 1}`,
         marketId: market.id,
         outcome: input.outcome,
         shares,
@@ -209,21 +258,42 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
       };
       state.positions.push(position);
     }
-    state.account.balance -= cost;
+    state.account.balance = Number((state.account.balance - cost).toFixed(2));
   } else {
     if (!position || position.shares < shares) {
       throw new Error("Not enough shares to sell");
     }
+    const proceeds = shares * price;
+    const costBasis = position.avgPrice * shares;
+    const realized = proceeds - costBasis;
     position.shares -= shares;
-    state.account.balance += shares * price;
+    state.account.balance = Number((state.account.balance + proceeds).toFixed(2));
     if (position.shares === 0) {
       state.positions = state.positions.filter((p) => p.id !== position!.id);
+      position = null;
     }
+    state.journal.unshift({
+      id: `jnl-${tenantId}-live-${Date.now()}-${state.orders.length + 1}`,
+      kind: "trade",
+      marketId: market.id,
+      marketQuestion: market.question,
+      outcome: input.outcome,
+      side: input.side,
+      shares,
+      price,
+      pnl: Number(realized.toFixed(2)),
+      note: "",
+      tags: [market.source],
+      executedAt: order.filledAt,
+    });
+    state.orders.push(order);
+    const account = syncAccountMetrics(tenantId);
+    return { order, position, account };
   }
 
   state.orders.push(order);
   state.journal.unshift({
-    id: `jnl-${tenantId}-live-${state.orders.length}`,
+    id: `jnl-${tenantId}-live-${Date.now()}-${state.orders.length}`,
     kind: "trade",
     marketId: market.id,
     marketQuestion: market.question,
@@ -233,11 +303,12 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
     price,
     pnl: null,
     note: "",
-    tags: [],
+    tags: [market.source],
     executedAt: order.filledAt,
   });
 
-  return { order, position };
+  const account = syncAccountMetrics(tenantId);
+  return { order, position, account };
 }
 
 // ---------------------------------------------------------------------------

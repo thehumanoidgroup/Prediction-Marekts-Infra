@@ -44,10 +44,14 @@ export interface TenantOverrides {
 
 interface Store {
   markets: Market[];
+  /** External Polymarket / Kalshi markets registered for virtual trading. */
+  externalMarkets: Map<string, Market>;
   globalTemplates: Market[];
   platformActivity: PlatformActivity[];
   platformAnalytics: PlatformAnalyticsPoint[];
   tenants: Map<string, TenantState>;
+  /** Tenants whose portfolio was loaded or saved from durable storage. */
+  hydratedTenants: Set<string>;
   leaderboards: Map<string, LeaderboardEntry[]>;
   adminTraders: Map<string, AdminTrader[]>;
   overrides: Map<string, TenantOverrides>;
@@ -550,10 +554,12 @@ function createStore(): Store {
   const now = Date.now();
   return {
     markets: generateMarkets(now),
+    externalMarkets: new Map(),
     globalTemplates: generateGlobalTemplates(now),
     platformActivity: generatePlatformActivity(now, listTenants()),
     platformAnalytics: generatePlatformAnalytics(now),
     tenants: new Map(),
+    hydratedTenants: new Set(),
     leaderboards: new Map(),
     adminTraders: new Map(),
     overrides: new Map(),
@@ -577,6 +583,45 @@ export function getTenantState(tenantId: string): TenantState {
     store.tenants.set(tenantId, state);
   }
   return state;
+}
+
+/** Replace in-memory tenant portfolio (used when hydrating from durable storage). */
+export function setTenantState(tenantId: string, state: TenantState): TenantState {
+  const store = getStore();
+  store.tenants.set(tenantId, state);
+  store.hydratedTenants.add(tenantId);
+  return state;
+}
+
+export function markTenantHydrated(tenantId: string): void {
+  getStore().hydratedTenants.add(tenantId);
+}
+
+export function isTenantHydrated(tenantId: string): boolean {
+  return getStore().hydratedTenants.has(tenantId);
+}
+
+/** Register or refresh an external market so positions can mark-to-market. */
+export function ensureExternalMarket(market: Market): Market {
+  const store = getStore();
+  store.externalMarkets.set(market.id, market);
+  return market;
+}
+
+export function getRegisteredMarket(id: string): Market | null {
+  const store = getStore();
+  return store.markets.find((m) => m.id === id) ?? store.externalMarkets.get(id) ?? null;
+}
+
+export function listExternalMarkets(): Market[] {
+  return [...getStore().externalMarkets.values()];
+}
+
+export function restoreExternalMarkets(markets: Market[]): void {
+  const store = getStore();
+  for (const market of markets) {
+    store.externalMarkets.set(market.id, market);
+  }
 }
 
 export function getLeaderboard(tenantId: string): LeaderboardEntry[] {
