@@ -309,6 +309,42 @@ class LiveEventService:
             await self._refresh_polymarket_snapshot(event)
         elif event.source == LiveEventSource.KALSHI:
             await self._refresh_kalshi_snapshot(event)
+        elif event.source == LiveEventSource.SP500_DYNAMIC:
+            await self._refresh_sp500_snapshot(event)
+
+    async def _refresh_sp500_snapshot(self, event: LiveEvent) -> None:
+        """Ensure the Alpaca quote bridge is subscribed for this event's ticker.
+
+        Probability odds stay LMSR-driven; underlying equity price is streamed
+        separately as ``stock_quote`` messages.
+
+        Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+        """
+        ticker = (event.stock_ticker or "").strip().upper()
+        if not ticker:
+            return
+        try:
+            from services.alpaca_quote_bridge import get_alpaca_quote_bridge
+
+            await get_alpaca_quote_bridge().touch_ticker(ticker)
+        except Exception:  # noqa: BLE001
+            logger.debug("Alpaca quote bridge unavailable for %s", ticker, exc_info=True)
+
+    async def record_view(self, event_id: str) -> LiveEvent | None:
+        """Record a card view and subscribe Alpaca IEX for sp500_dynamic tickers."""
+        from services.live_feed_analytics import analytics
+
+        event = await self._resolve_event(event_id)
+        if event is None:
+            return None
+
+        ticker = (event.stock_ticker or "").strip().upper() or None
+        analytics.record_event_view(event.id, stock_ticker=ticker)
+
+        if event.source == LiveEventSource.SP500_DYNAMIC and ticker:
+            await self._refresh_sp500_snapshot(event)
+
+        return event
 
     def _count_by_source(self, events: list[LiveEvent]) -> dict[str, int]:
         counts = {

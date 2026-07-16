@@ -14,7 +14,7 @@ from realtime.update_batcher import batcher
 
 logger = logging.getLogger(__name__)
 
-EventMessageType = Literal["price_update", "status_change", "new_event"]
+EventMessageType = Literal["price_update", "status_change", "new_event", "stock_quote"]
 
 
 def category_room(category: str) -> str:
@@ -27,11 +27,17 @@ def event_room(event_id: str) -> str:
     return f"event:{event_id}"
 
 
+def ticker_room(ticker: str) -> str:
+    """Room key for S&P 500 underlying equity quote fans."""
+    return f"ticker:{ticker.upper()}"
+
+
 def _target_rooms(
     *,
     category: str | None = None,
     event_id: str | None = None,
     external_id: str | None = None,
+    ticker: str | None = None,
 ) -> list[str]:
     rooms = ["all"]
     if category:
@@ -40,6 +46,8 @@ def _target_rooms(
         rooms.append(event_room(event_id))
     if external_id and external_id != event_id:
         rooms.append(event_room(external_id))
+    if ticker:
+        rooms.append(ticker_room(ticker))
     return rooms
 
 
@@ -59,6 +67,7 @@ async def _broadcast(
     *,
     category: str | None = None,
     external_id: str | None = None,
+    ticker: str | None = None,
     tenant_slugs: list[str] | None = None,
 ) -> None:
     payload = {
@@ -67,7 +76,12 @@ async def _broadcast(
         "data": data,
         "ts": int(time.time() * 1000),
     }
-    rooms = _target_rooms(category=category, event_id=event_id, external_id=external_id)
+    rooms = _target_rooms(
+        category=category,
+        event_id=event_id,
+        external_id=external_id,
+        ticker=ticker,
+    )
 
     slugs = await _active_tenant_slugs(tenant_slugs)
     for slug in slugs:
@@ -190,6 +204,45 @@ async def broadcast_new_event(
         data,
         category=category,
         external_id=external_id or event_id,
+        tenant_slugs=tenant_slugs,
+    )
+
+
+async def broadcast_stock_quote(
+    *,
+    stock_ticker: str,
+    last_price: float,
+    event_id: str | None = None,
+    external_id: str | None = None,
+    bid: float | None = None,
+    ask: float | None = None,
+    source: str = "sp500_dynamic",
+    tenant_slugs: list[str] | None = None,
+) -> None:
+    """Push an underlying equity quote for S&P 500 dynamic markets.
+
+    Alpaca WebSocket for MVP. Polygon WebSocket ready for later scaling.
+    """
+    ticker = stock_ticker.strip().upper()
+    data: dict[str, Any] = {
+        "stock_ticker": ticker,
+        "last_price": float(last_price),
+        "source": source,
+    }
+    if external_id:
+        data["external_id"] = external_id
+    if bid is not None:
+        data["bid"] = float(bid)
+    if ask is not None:
+        data["ask"] = float(ask)
+
+    await _broadcast(
+        "stock_quote",
+        event_id or f"ticker:{ticker}",
+        data,
+        category="stocks",
+        external_id=external_id,
+        ticker=ticker,
         tenant_slugs=tenant_slugs,
     )
 
