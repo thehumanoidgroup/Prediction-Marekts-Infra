@@ -57,13 +57,17 @@ export async function listHybridMarkets(
     markets.push(...(await poly));
   }
 
-  if (source === "kalshi") {
-    const { searchKalshiMarkets, getActiveKalshiMarkets } = await import("@/lib/kalshi/service");
-    const kalshi =
-      query.trim() && source === "kalshi"
-        ? await searchKalshiMarkets(query, refresh)
-        : await getActiveKalshiMarkets(refresh);
-    markets.push(...kalshi);
+  if (source === "kalshi" || source === "all") {
+    try {
+      const { searchKalshiMarkets, getActiveKalshiMarkets } = await import("@/lib/kalshi/service");
+      const kalshi =
+        source === "kalshi" && query.trim()
+          ? await searchKalshiMarkets(query, refresh)
+          : await getActiveKalshiMarkets(refresh);
+      markets.push(...kalshi);
+    } catch {
+      /* Kalshi public API unavailable — continue with other sources */
+    }
   }
 
   if (source === "all") {
@@ -78,6 +82,10 @@ export async function listHybridMarkets(
   } else if (source === "polymarket" || source === "kalshi") {
     if (category !== "all") {
       markets = markets.filter((market) => market.category === category);
+    }
+    if (query.trim() && source === "polymarket") {
+      const needle = query.trim().toLowerCase();
+      markets = markets.filter((market) => market.question.toLowerCase().includes(needle));
     }
     markets = sortMarkets(markets, sort);
   }

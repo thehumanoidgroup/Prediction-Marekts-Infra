@@ -88,14 +88,17 @@ export async function getActiveKalshiMarkets(refresh = false): Promise<KalshiMar
     const page = await fetchKalshiMarkets({ status: "open", limit: 100, cursor: cursor ?? undefined });
     for (const raw of page.markets) {
       try {
-        markets.push(normalizeKalshiMarket(raw));
+        const market = normalizeKalshiMarket(raw);
+        // Skip multi-leg combo titles that remain unreadable after normalization.
+        if ((market.question.match(/,/g) ?? []).length >= 3) continue;
+        markets.push(market);
       } catch {
         /* skip malformed */
       }
     }
     cursor = page.cursor;
     pages += 1;
-  } while (cursor && pages < 5);
+  } while (cursor && pages < 2);
 
   writeCache(cacheKey, markets);
   return markets;
