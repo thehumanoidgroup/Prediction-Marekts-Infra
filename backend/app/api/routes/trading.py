@@ -181,6 +181,21 @@ async def place_order(
                 yes_price=float(market.get("yesPrice") or 0.5),
                 category=str(market.get("category") or "economics"),
             )
+        elif market_id.lower().startswith("poly-") or market_id.lower().startswith("0x"):
+            market = await get_hybrid_market(market_id)
+            if market is None:
+                raise HTTPException(404, detail="Polymarket market not found")
+
+            result = store.place_external_order(
+                session,
+                market_id=market_id,
+                market_question=str(market.get("question") or market_id),
+                outcome=body.outcome,
+                side=body.side,
+                shares=body.shares,
+                yes_price=float(market.get("yesPrice") or 0.5),
+                category=str(market.get("category") or "politics"),
+            )
         elif market_id.lower().startswith("sp500-"):
             if session.sp500_tickers and not _sp500_ticker_allowed(session, market_id):
                 raise HTTPException(403, detail="S&P 500 ticker not in your allowlist")

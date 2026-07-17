@@ -52,6 +52,12 @@ def test_build_trader_plans_distributes_model_types():
     assert [p.model_type for p in plans] == list(MODEL_TYPES)
     assert len({p.email for p in plans}) == 4
     assert all(p.account_size in {10_000, 25_000, 50_000, 100_000} for p in plans)
+    assert {p.provider for p in plans} == {
+        "internal",
+        "kalshi",
+        "polymarket",
+        "sp500_dynamic",
+    }
 
 
 def test_build_trader_plans_clamps_to_3_5():

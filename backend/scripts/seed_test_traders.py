@@ -7,7 +7,9 @@ For each existing ``Tenant`` (prop firm):
 2. Create 3–5 test traders with model types distributed evenly
    (``1step``, ``2step``, ``3step``, ``instant``)
 3. Provision each via :func:`provision_new_account` (applies firm templates)
-4. Optionally place a few sample LMSR positions so Portfolio has data
+4. Optionally place sample positions (LMSR + provider-tagged virtual fills)
+   so each trader's Portfolio has open bets across internal / Kalshi /
+   Polymarket / S&P 500 filters
 
 Run from the ``backend/`` directory::
 
@@ -74,6 +76,22 @@ SAMPLE_POSITION_SPECS: tuple[tuple[str, str, int], ...] = (
     ("mkt-11", "yes", 30),
 )
 
+# Synthetic external fills so Portfolio filters work per provider.
+EXTERNAL_SAMPLE_SPECS: dict[str, tuple[tuple[str, str, str, int, float], ...]] = {
+    MarketProvider.KALSHI.value: (
+        ("kalshi-SEEDKXBTCD", "Will BTC settle above strike this week?", "yes", 35, 0.48),
+        ("kalshi-SEEDFEDRATE", "Will the Fed cut rates this meeting?", "no", 20, 0.41),
+    ),
+    MarketProvider.POLYMARKET.value: (
+        ("poly-seed-election-2026", "Will the incumbent party hold Congress?", "yes", 30, 0.52),
+        ("poly-seed-ai-release", "Will a major AI model ship before Q4?", "no", 25, 0.37),
+    ),
+    MarketProvider.SP500_DYNAMIC.value: (
+        ("sp500-AAPL-seed-0dte", "Will AAPL finish above strike today?", "yes", 40, 0.55),
+        ("sp500-NVDA-seed-weekly", "Will NVDA finish above strike this week?", "no", 22, 0.44),
+    ),
+}
+
 
 @dataclass(frozen=True)
 class TraderSeedPlan:
@@ -85,11 +103,20 @@ class TraderSeedPlan:
     provider: str
 
 
+_PROVIDER_ROTATION: tuple[str, ...] = (
+    MarketProvider.INTERNAL.value,
+    MarketProvider.KALSHI.value,
+    MarketProvider.POLYMARKET.value,
+    MarketProvider.SP500_DYNAMIC.value,
+)
+
+
 def _provider_for_tenant(tenant: Tenant, index: int) -> str:
-    """Prefer Kalshi on apex; otherwise keep internal LMSR."""
+    """Rotate providers so each firm gets coverage across all market sources."""
+    # Keep apex biased toward Kalshi for live-integration demos.
     if tenant.slug == "apex" and index % 2 == 1:
         return MarketProvider.KALSHI.value
-    return MarketProvider.INTERNAL.value
+    return _PROVIDER_ROTATION[index % len(_PROVIDER_ROTATION)]
 
 
 def build_trader_plans(tenant: Tenant, traders_per_firm: int) -> list[TraderSeedPlan]:
@@ -129,7 +156,12 @@ async def seed_sample_positions(
     user: User,
     account: TraderDemoAccount,
 ) -> int:
-    """Place a few LMSR buys if the trader session has no open positions."""
+    """Place sample buys so each trader's Portfolio has open positions.
+
+    Internal accounts get LMSR catalog fills. Kalshi / Polymarket / S&P 500
+    accounts get virtual external fills tagged with the correct provider so
+    Portfolio filters and live marks work end-to-end.
+    """
     store = get_trading_store()
     session = store.get_session(
         tenant.slug,
@@ -143,29 +175,71 @@ async def seed_sample_positions(
     if session.bankroll.positions():
         return 0
 
-    available_ids = {seed.id for seed in MARKET_SEEDS}
     placed = 0
-    for market_id, outcome, shares in SAMPLE_POSITION_SPECS:
-        if market_id not in available_ids:
-            continue
-        if store.get_market(market_id) is None:
-            continue
+    provider = account.provider.value
+
+    if provider == MarketProvider.INTERNAL.value:
+        available_ids = {seed.id for seed in MARKET_SEEDS}
+        for market_id, outcome, shares in SAMPLE_POSITION_SPECS:
+            if market_id not in available_ids:
+                continue
+            if store.get_market(market_id) is None:
+                continue
+            try:
+                store.place_order(
+                    session,
+                    market_id=market_id,
+                    outcome=outcome,
+                    side="buy",
+                    shares=shares,
+                )
+                placed += 1
+            except ValueError as exc:
+                logger.warning(
+                    "Skip sample position %s for %s: %s",
+                    market_id,
+                    user.email,
+                    exc,
+                )
+        return placed
+
+    specs = EXTERNAL_SAMPLE_SPECS.get(provider, ())
+    for market_id, question, outcome, shares, yes_price in specs:
         try:
-            store.place_order(
+            store.place_external_order(
                 session,
                 market_id=market_id,
+                market_question=question,
                 outcome=outcome,
                 side="buy",
                 shares=shares,
+                yes_price=yes_price,
+                category="stocks" if provider == MarketProvider.SP500_DYNAMIC.value else "economics",
             )
             placed += 1
         except ValueError as exc:
             logger.warning(
-                "Skip sample position %s for %s: %s",
+                "Skip external sample %s for %s: %s",
                 market_id,
                 user.email,
                 exc,
             )
+
+    # Always include one internal LMSR fill so "All" and internal filters
+    # still show data even on external-provider accounts.
+    if store.get_market("mkt-1") is not None:
+        try:
+            store.place_order(
+                session,
+                market_id="mkt-1",
+                outcome="yes",
+                side="buy",
+                shares=15,
+            )
+            placed += 1
+        except ValueError:
+            pass
+
     return placed
 
 
@@ -280,7 +354,7 @@ async def seed_firm(
     await ensure_tenant_account_catalog(
         db,
         tenant,
-        include_kalshi=tenant.slug == "apex",
+        include_kalshi=True,
     )
     templates = await ensure_firm_templates(db, tenant)
     plans = build_trader_plans(tenant, traders_per_firm)

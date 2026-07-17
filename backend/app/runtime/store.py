@@ -23,6 +23,20 @@ def _clamp_price(p: float) -> float:
     return min(0.97, max(0.03, p))
 
 
+def infer_market_source(market_id: str) -> str:
+    """Map market id prefixes to portfolio provider filters."""
+    lower = market_id.lower()
+    if lower.startswith("kalshi-"):
+        return "kalshi"
+    if lower.startswith("poly-") or lower.startswith("0x"):
+        return "polymarket"
+    if lower.startswith("sp500-"):
+        return "sp500_dynamic"
+    if lower.startswith("mkt-"):
+        return "internal"
+    return "external"
+
+
 @dataclass
 class JournalRecord:
     id: str
@@ -415,10 +429,14 @@ class TradingStore:
         external_priced = (
             market_id.lower().startswith("kalshi-")
             or market_id.lower().startswith("sp500-")
+            or market_id.lower().startswith("poly-")
+            or market_id.lower().startswith("0x")
             or market_id in session.external_markets
         )
         if external_priced and (
             market_id.lower().startswith("kalshi-")
+            or market_id.lower().startswith("poly-")
+            or market_id.lower().startswith("0x")
             or market_id in session.external_markets
             or self.get_market(market_id) is None
         ):
@@ -716,13 +734,7 @@ class TradingStore:
                 "question": market_question,
                 "category": category,
                 "yesPrice": yes_price,
-                "source": (
-                    "kalshi"
-                    if market_id.startswith("kalshi-")
-                    else "sp500_dynamic"
-                    if market_id.startswith("sp500-")
-                    else "external"
-                ),
+                "source": infer_market_source(market_id),
             }
 
             prices = self.market_prices_for_session(session)
@@ -744,13 +756,7 @@ class TradingStore:
                     price=fill_price,
                     pnl=None,
                     note="",
-                    tags=(
-                        ["kalshi"]
-                        if market_id.startswith("kalshi-")
-                        else ["sp500_dynamic"]
-                        if market_id.startswith("sp500-")
-                        else ["external"]
-                    ),
+                    tags=[infer_market_source(market_id)],
                     executed_at=now_ms(),
                 ),
             )

@@ -7,7 +7,9 @@ Idempotent maintenance / seed utilities for the FastAPI trading backend.
 Creates 3–5 demo traders per prop firm with evenly distributed challenge model
 types (`1step`, `2step`, `3step`, `instant`), applies each firm’s
 `PropFirmChallengeTemplate`, provisions via `provision_new_account`, and
-optionally places sample LMSR positions for the Portfolio view.
+optionally places sample positions for the Portfolio view across **internal**,
+**Kalshi**, **Polymarket**, and **S&P 500** providers (provider-tagged virtual
+fills + LMSR where applicable).
 
 ```bash
 cd backend

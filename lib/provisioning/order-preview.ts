@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/db";
 import { validateOrderRisk } from "@/lib/engine/risk";
+import { getPositions } from "@/lib/services";
 import { ensureRiskEngineHydrated } from "@/services/account-provisioning";
 import type { OrderRiskPreview, Outcome } from "@/types";
 
@@ -24,6 +25,11 @@ export async function previewOrderRisk(input: {
   yesPrice: number;
 }): Promise<OrderRiskPreview> {
   const stake = estimateStake(input.outcome, input.side, input.shares, input.yesPrice);
+  const openOnMarket = getPositions(input.tenantId)
+    .filter((p) => p.marketId === input.marketId)
+    .reduce((sum, p) => sum + p.cost, 0);
+  const projectedMarketExposure =
+    input.side === "buy" ? openOnMarket + stake : Math.max(0, openOnMarket - stake);
 
   if (!process.env.DATABASE_URL) {
     return {
@@ -32,6 +38,8 @@ export async function previewOrderRisk(input: {
       violations: [],
       stake,
       side: input.side,
+      projectedMarketExposure,
+      projectedTotalExposure: projectedMarketExposure,
     };
   }
 
@@ -53,6 +61,8 @@ export async function previewOrderRisk(input: {
       violations: [],
       stake,
       side: input.side,
+      projectedMarketExposure,
+      projectedTotalExposure: projectedMarketExposure,
     };
   }
 
@@ -60,7 +70,7 @@ export async function previewOrderRisk(input: {
   const maxExposure = Number(rules.maxExposurePerMarket ?? stake * 2);
   const validation = validateOrderRisk(account.id, {
     orderCostUsd: stake,
-    marketExposureUsd: stake,
+    marketExposureUsd: projectedMarketExposure,
   });
 
   const violations = validation.allowed ? [] : [validation.reason ?? "Risk limit exceeded"];
@@ -78,8 +88,8 @@ export async function previewOrderRisk(input: {
     violations,
     stake,
     side: input.side,
-    projectedMarketExposure: stake,
-    projectedTotalExposure: stake,
+    projectedMarketExposure,
+    projectedTotalExposure: projectedMarketExposure,
     maxStakePerOrder: maxStake || null,
     maxExposurePerMarket: maxExposure,
     maxTotalExposure: null,
