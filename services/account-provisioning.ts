@@ -287,6 +287,7 @@ export async function provisionNewAccount(
             maxBetSizeValue: challengeConfig.maxBetSizeValue,
             maxBetSizeMode: fromApiMaxBetMode(challengeConfig.maxBetSizeMode ?? "percent"),
             consistencyScore: challengeConfig.consistencyScore ?? null,
+            templateId: challengeConfig.templateId ?? null,
             provider,
             sp500Tickers: sp500Tickers.length ? sp500Tickers : undefined,
             otherCustomRules: otherCustomRules as Prisma.InputJsonValue,

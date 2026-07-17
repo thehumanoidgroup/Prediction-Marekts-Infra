@@ -203,6 +203,8 @@ export function mergeChallengeConfig(
       overrides.consistencyScore !== undefined
         ? overrides.consistencyScore
         : base.consistencyScore,
+    templateId:
+      overrides.templateId !== undefined ? overrides.templateId : base.templateId,
     otherCustomRules: {
       ...base.otherCustomRules,
       ...(overrides.otherCustomRules ?? {}),

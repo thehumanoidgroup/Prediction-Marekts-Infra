@@ -7,10 +7,13 @@ import {
   numericAccountSizeToApi,
 } from "@/lib/provisioning/kalshi-admin";
 import { getOrCreateFirmSettings } from "@/lib/provisioning/firm-settings";
+import { getTemplateForModel } from "@/lib/provisioning/challenge-template-service";
+import { firmTemplateToChallengeRulesInput } from "@/lib/provisioning/firm-template-rules";
 import {
   normalizeChallengeRulesInput,
   normalizeProvider,
 } from "@/lib/provisioning/challenge-rules";
+import { defaultVirtualBalance } from "@/lib/provisioning/serialize";
 import { getSp500ChallengeTemplate } from "@/lib/sp500/challenge-templates";
 import { resolveChallengeConfigForAccount } from "@/services/account-provisioning";
 
@@ -37,13 +40,18 @@ export async function POST(request: NextRequest) {
   const accountSize = numericAccountSizeToApi(
     typeof payload.account_size === "number" ? payload.account_size : 25_000,
   );
+  const accountSizeUsd = defaultVirtualBalance(accountSize);
 
   const templateId =
     typeof payload.template_config_id === "string" ? payload.template_config_id : "";
   const template =
     provider === "sp500_dynamic" && templateId ? getSp500ChallengeTemplate(templateId) : null;
 
+  const firmTemplate = await getTemplateForModel(tenant.id, modelType);
+  const firmRules = firmTemplateToChallengeRulesInput(firmTemplate, accountSizeUsd);
+
   const customRules = normalizeChallengeRulesInput({
+    ...firmRules,
     ...(template
       ? {
           profit_target_pct: template.rules.profit_target_pct,
@@ -70,6 +78,7 @@ export async function POST(request: NextRequest) {
     accountSize,
     customRules,
     challengeConfigOverrides: {
+      templateId: firmTemplate.isDefault ? null : firmTemplate.id,
       otherCustomRules: { provider },
     },
     firmProgram: tenant.program,

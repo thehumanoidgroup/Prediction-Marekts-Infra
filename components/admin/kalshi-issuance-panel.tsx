@@ -11,12 +11,18 @@ import {
   type ModelType,
   type ProvisionResult,
 } from "@/lib/account-provisioning";
+import type { ChallengeTemplateView } from "@/lib/provisioning/challenge-template-defaults";
+import {
+  FIRM_MODEL_TYPE_LABELS,
+  firmTemplateToChallengeRulesInput,
+} from "@/lib/provisioning/firm-template-rules";
 import { formatCompactUsd } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChallengeRulesPreview } from "@/components/admin/challenge-rules-preview";
 import { IconClose } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
+import type { PropFirmModelType } from "@/types/provisioning";
 
 const inputClass =
   "h-10 w-full rounded-lg border border-edge bg-surface-2 px-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-accent/50 focus:ring-1 focus:ring-accent/30";
@@ -184,13 +190,34 @@ export function KalshiIssuancePanel({
   const [modelType, setModelType] = useState<ModelType>("1step");
   const [templateId, setTemplateId] = useState<string>("");
   const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
-  const [customOpen, setCustomOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(true);
   const [customRules, setCustomRules] = useState<ChallengeRulesInput>({});
+  const [firmTemplateLoading, setFirmTemplateLoading] = useState(false);
+  const [firmTemplateNote, setFirmTemplateNote] = useState<{
+    label: string;
+    isDefault: boolean;
+  } | null>(null);
+  const [loadedBetMode, setLoadedBetMode] = useState<"percent" | "fixed" | null>(null);
+  const [loadedBetValue, setLoadedBetValue] = useState<number | null>(null);
   const [preview, setPreview] = useState<ChallengeRules | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ProvisionResult | null>(null);
+
+  const applyFirmTemplate = useCallback((template: ChallengeTemplateView, size: number) => {
+    setCustomRules(firmTemplateToChallengeRulesInput(template, size));
+    setCustomOpen(true);
+    setLoadedBetMode(template.maxBetSizeMode);
+    setLoadedBetValue(template.maxBetSizePerPick);
+    const label =
+      FIRM_MODEL_TYPE_LABELS[template.modelType as PropFirmModelType] ??
+      template.modelType.toUpperCase();
+    setFirmTemplateNote({
+      label,
+      isDefault: template.isDefault,
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -207,6 +234,45 @@ export function KalshiIssuancePanel({
       }
     })();
   }, [open, provider]);
+
+  useEffect(() => {
+    if (!open || result) return;
+    if (modelType === "evaluation") return;
+    // Stock-event / copy-from-template selection owns the rules until cleared.
+    if (templateId) return;
+
+    let cancelled = false;
+    setFirmTemplateLoading(true);
+    (async () => {
+      try {
+        const response = await fetch(`/api/admin/challenge-templates/${modelType}`);
+        if (!response.ok) throw new Error("Failed to load template");
+        const body = (await response.json()) as { template: ChallengeTemplateView };
+        if (cancelled || !body.template) return;
+        applyFirmTemplate(body.template, accountSize);
+      } catch {
+        if (!cancelled) setFirmTemplateNote(null);
+      } finally {
+        if (!cancelled) setFirmTemplateLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- accountSize rescale is separate
+  }, [open, result, modelType, templateId, provider, applyFirmTemplate]);
+
+  useEffect(() => {
+    if (!open || result || templateId) return;
+    if (loadedBetMode !== "percent" || loadedBetValue == null) return;
+    const stake = Math.round((loadedBetValue / 100) * accountSize * 100) / 100;
+    setCustomRules((current) => ({
+      ...current,
+      max_stake_per_order: stake,
+      max_exposure_per_market: Math.round(stake * 2 * 100) / 100,
+    }));
+  }, [accountSize, loadedBetMode, loadedBetValue, open, result, templateId]);
 
   const previewPayload = useMemo(
     () => ({
@@ -245,7 +311,12 @@ export function KalshiIssuancePanel({
   function applyTemplate(id: string) {
     setTemplateId(id);
     const template = templates.find((t) => t.id === id);
-    if (!template) return;
+    if (!template) {
+      setFirmTemplateNote(null);
+      setLoadedBetMode(null);
+      setLoadedBetValue(null);
+      return;
+    }
     setModelType(template.rules.model_type as ModelType);
     setAccountSize(template.rules.account_size);
     setCustomRules({
@@ -259,6 +330,13 @@ export function KalshiIssuancePanel({
       min_trading_days: template.rules.min_trading_days,
       challenge_duration_days: template.rules.challenge_duration_days,
       profit_split_pct: template.rules.profit_split_pct,
+    });
+    setCustomOpen(true);
+    setLoadedBetMode(null);
+    setLoadedBetValue(null);
+    setFirmTemplateNote({
+      label: template.prop_firm_label ?? template.name,
+      isDefault: false,
     });
   }
 
@@ -302,7 +380,10 @@ export function KalshiIssuancePanel({
     setModelType("1step");
     setTemplateId("");
     setCustomRules({});
-    setCustomOpen(false);
+    setCustomOpen(true);
+    setFirmTemplateNote(null);
+    setLoadedBetMode(null);
+    setLoadedBetValue(null);
     setError(null);
   }
 
@@ -427,7 +508,10 @@ export function KalshiIssuancePanel({
                       <button
                         key={model.id}
                         type="button"
-                        onClick={() => setModelType(model.id)}
+                        onClick={() => {
+                          setModelType(model.id);
+                          setTemplateId("");
+                        }}
                         className={cn(
                           "rounded-xl border px-3 py-3 text-left transition-all",
                           modelType === model.id
@@ -440,6 +524,15 @@ export function KalshiIssuancePanel({
                       </button>
                     ))}
                   </div>
+                  {firmTemplateLoading ? (
+                    <p className="mt-3 text-[11px] text-faint">Loading model template…</p>
+                  ) : firmTemplateNote ? (
+                    <p className="mt-3 rounded-xl border border-accent/25 bg-accent-soft/50 px-3 py-2.5 text-xs leading-relaxed text-foreground">
+                      Rules loaded from {firmTemplateNote.label} template
+                      {firmTemplateNote.isDefault ? " (platform defaults)" : ""}. Changes
+                      apply only to this account.
+                    </p>
+                  ) : null}
                 </section>
 
                 {templates.length > 0 ? (
@@ -471,15 +564,20 @@ export function KalshiIssuancePanel({
                 ) : null}
 
                 <section>
-                  <button
-                    type="button"
-                    onClick={() => setCustomOpen((v) => !v)}
-                    className="text-xs font-semibold text-accent hover:underline"
-                  >
-                    {customOpen ? "Hide custom rules" : "Customize challenge rules"}
-                  </button>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
+                      Challenge rules
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setCustomOpen((v) => !v)}
+                      className="text-xs font-semibold text-accent hover:underline"
+                    >
+                      {customOpen ? "Hide fields" : "Edit overrides"}
+                    </button>
+                  </div>
                   {customOpen ? (
-                    <div className="mt-3 grid gap-3 rounded-xl border border-edge bg-surface-2 p-4 sm:grid-cols-2">
+                    <div className="grid gap-3 rounded-xl border border-edge bg-surface-2 p-4 sm:grid-cols-2">
                       {(
                         [
                           ["profit_target_pct", "Profit target %", 1, 100],
@@ -504,6 +602,10 @@ export function KalshiIssuancePanel({
                             }
                             onChange={(e) => {
                               const val = e.target.valueAsNumber;
+                              if (key === "max_stake_per_order") {
+                                setLoadedBetMode(null);
+                                setLoadedBetValue(null);
+                              }
                               setCustomRules((r) => ({
                                 ...r,
                                 [key]: Number.isFinite(val) ? val : undefined,
@@ -530,7 +632,12 @@ export function KalshiIssuancePanel({
                         </select>
                       </Field>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-muted">
+                      Template rules are applied. Expand to override any field for this account
+                      only.
+                    </p>
+                  )}
                 </section>
 
                 {error ? (
