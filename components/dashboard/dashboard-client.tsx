@@ -22,10 +22,12 @@ import { Sp500MarketsSection } from "@/components/dashboard/sp500-markets-sectio
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
 import { OpenPositionsPanel } from "@/components/dashboard/open-positions-panel";
+import { ChallengeRiskBanners } from "@/components/dashboard/challenge-risk-banners";
 import { MoversList } from "@/components/dashboard/movers-list";
 import { PortfolioCard } from "@/components/dashboard/portfolio-card";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
 import { FeedStatusDot } from "@/components/markets/live-price";
+import { buildChallengeWarnings } from "@/lib/challenge-warnings";
 import { cn } from "@/lib/utils";
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -70,6 +72,7 @@ export function DashboardClient({
     journal.status === "success" ? journal.data.slice(0, 4) : initial?.journal?.slice(0, 4) ?? [];
   const moverMarkets =
     movers.status === "success" ? movers.data : initial?.movers ?? [];
+  const challengeWarnings = buildChallengeWarnings(account, summary);
 
   const totalPnlPct = (account.totalPnl / account.startingBalance) * 100;
   const profitTargetUsd = account.startingBalance * (1 + account.profitTargetPct / 100);
@@ -130,6 +133,8 @@ export function DashboardClient({
       {journal.status === "error" ? (
         <ErrorBanner message={journal.error} onRetry={reload} />
       ) : null}
+
+      <ChallengeRiskBanners warnings={challengeWarnings} />
 
       <StatCards stats={stats} />
 

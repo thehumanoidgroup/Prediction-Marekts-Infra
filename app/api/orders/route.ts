@@ -43,12 +43,26 @@ export async function POST(request: NextRequest) {
   const { marketId, outcome, side, shares, yesPrice } = (body ?? {}) as Record<string, unknown>;
   if (
     typeof marketId !== "string" ||
+    !marketId.trim() ||
     (outcome !== "yes" && outcome !== "no") ||
     (side !== "buy" && side !== "sell") ||
-    typeof shares !== "number"
+    typeof shares !== "number" ||
+    !Number.isFinite(shares) ||
+    shares <= 0 ||
+    !Number.isInteger(shares)
   ) {
     return NextResponse.json(
-      { error: "Expected { marketId, outcome: yes|no, side: buy|sell, shares: number }" },
+      {
+        error:
+          "Expected { marketId, outcome: yes|no, side: buy|sell, shares: positive integer }",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (typeof yesPrice === "number" && (!Number.isFinite(yesPrice) || yesPrice <= 0 || yesPrice >= 1)) {
+    return NextResponse.json(
+      { error: "yesPrice must be a probability between 0 and 1 when provided" },
       { status: 400 },
     );
   }

@@ -1,7 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import type { EnrichedPosition } from "@/lib/services";
 import type { ChallengeAccount, PortfolioSummary } from "@/lib/types";
+import { buildChallengeWarnings } from "@/lib/challenge-warnings";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
 import {
   formatPct,
@@ -11,8 +13,11 @@ import {
 } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ProviderBadge } from "@/components/ui/provider-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EquityChart } from "@/components/charts/equity-chart";
 import { OpenPositionsPanel } from "@/components/dashboard/open-positions-panel";
+import { ChallengeRiskBanners } from "@/components/dashboard/challenge-risk-banners";
+import { ChallengePanel } from "@/components/dashboard/challenge-panel";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
 import { FeedStatusDot } from "@/components/markets/live-price";
 import { Button } from "@/components/ui/button";
@@ -33,12 +38,20 @@ export function PortfolioClient({
     positions: initial.positions,
   });
 
+  const isLoading = portfolio.status === "loading" && !initial.account;
+  const isError = portfolio.status === "error";
+
   const account =
     portfolio.status === "success" ? portfolio.data.account : initial.account;
   const summary =
     portfolio.status === "success" ? portfolio.data.summary : initial.summary;
   const positions =
     portfolio.status === "success" ? portfolio.data.positions : initial.positions;
+
+  const warnings = useMemo(
+    () => buildChallengeWarnings(account, summary),
+    [account, summary],
+  );
 
   const stats: Stat[] = [
     { label: "Balance", value: formatUsd(summary.balance), sub: "Settled cash" },
@@ -71,6 +84,23 @@ export function PortfolioClient({
     { label: "Worst day", value: formatSignedUsd(summary.worstDay), tone: "down" },
   ];
 
+  if (isLoading) {
+    return (
+      <div className="mx-auto flex max-w-7xl flex-col gap-4" aria-busy="true">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-64" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full rounded-xl" />
+          ))}
+        </div>
+        <OpenPositionsPanel positions={[]} loading />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -87,12 +117,20 @@ export function PortfolioClient({
             {account.label} · started {new Date(account.startedAt).toLocaleDateString()}
           </p>
         </div>
-        {portfolio.status === "error" ? (
+        {isError ? (
           <Button variant="secondary" size="sm" onClick={reload}>
             Retry
           </Button>
         ) : null}
       </div>
+
+      {isError ? (
+        <div className="rounded-xl border border-down/30 bg-down-soft px-4 py-3 text-sm text-down">
+          Could not refresh live portfolio data. Showing the last known snapshot.
+        </div>
+      ) : null}
+
+      <ChallengeRiskBanners warnings={warnings} />
 
       <StatCards stats={stats} />
 
@@ -108,27 +146,30 @@ export function PortfolioClient({
             />
           </CardBody>
         </Card>
-        <Card>
-          <CardHeader title="Trade statistics" subtitle="Closed trades only" />
-          <CardBody>
-            <dl className="divide-y divide-edge/60">
-              {tradeStats.map((stat) => (
-                <div key={stat.label} className="flex items-center justify-between py-2.5 text-sm">
-                  <dt className="text-muted">{stat.label}</dt>
-                  <dd
-                    className={cn(
-                      "tabular font-semibold",
-                      stat.tone === "up" && "text-up",
-                      stat.tone === "down" && "text-down",
-                    )}
-                  >
-                    {stat.value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </CardBody>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <ChallengePanel account={account} />
+          <Card>
+            <CardHeader title="Trade statistics" subtitle="Closed trades only" />
+            <CardBody>
+              <dl className="divide-y divide-edge/60">
+                {tradeStats.map((stat) => (
+                  <div key={stat.label} className="flex items-center justify-between py-2.5 text-sm">
+                    <dt className="text-muted">{stat.label}</dt>
+                    <dd
+                      className={cn(
+                        "tabular font-semibold",
+                        stat.tone === "up" && "text-up",
+                        stat.tone === "down" && "text-down",
+                      )}
+                    >
+                      {stat.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </CardBody>
+          </Card>
+        </div>
       </div>
 
       <OpenPositionsPanel
@@ -136,6 +177,7 @@ export function PortfolioClient({
         summary={summary}
         title="Open positions"
         showTotals
+        loading={refreshing && positions.length === 0}
       />
     </div>
   );

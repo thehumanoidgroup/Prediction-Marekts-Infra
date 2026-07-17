@@ -28,6 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MarketSourceBadge } from "@/components/markets/market-source-badge";
 import { FeedStatusDot } from "@/components/markets/live-price";
 import { cn } from "@/lib/utils";
@@ -93,6 +94,10 @@ function ClosePositionButton({
 
   async function closePosition() {
     if (!canClose || pending) return;
+    if (!Number.isFinite(position.shares) || position.shares <= 0) {
+      setError("Nothing to close");
+      return;
+    }
     setPending(true);
     setError(null);
     try {
@@ -107,9 +112,14 @@ function ClosePositionButton({
           yesPrice,
         }),
       });
-      const body = await response.json().catch(() => ({}));
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
       if (!response.ok) {
-        setError(body.detail ?? body.error ?? "Close failed");
+        const message =
+          (typeof body.detail === "string" && body.detail) ||
+          (typeof body.error === "string" && body.error) ||
+          (typeof body.userMessage === "string" && body.userMessage) ||
+          "Close failed";
+        setError(message);
         return;
       }
       notifyPortfolioPosition({
@@ -117,13 +127,13 @@ function ClosePositionButton({
         reason: body.position ? "position_updated" : "position_closed",
         marketId: position.marketId,
         position: (body.position ?? null) as EnrichedPosition | null,
-        summary: body.summary,
-        order: body.order,
-        positions: body.positions,
+        summary: body.summary as PortfolioSummary | undefined,
+        order: body.order as Record<string, unknown> | undefined,
+        positions: body.positions as EnrichedPosition[] | undefined,
       });
       router.refresh();
     } catch {
-      setError("Network error");
+      setError("Network error — try again");
     } finally {
       setPending(false);
     }
@@ -253,6 +263,7 @@ export function OpenPositionsPanel({
   title = "Open positions",
   showTotals = true,
   compactHeader = false,
+  loading = false,
   className,
 }: {
   positions: EnrichedPosition[];
@@ -260,6 +271,8 @@ export function OpenPositionsPanel({
   title?: string;
   showTotals?: boolean;
   compactHeader?: boolean;
+  /** Show shimmer placeholders while portfolio data is loading. */
+  loading?: boolean;
   className?: string;
 }) {
   const [tenor, setTenor] = useState<PositionTenorFilter>("all");
@@ -294,9 +307,11 @@ export function OpenPositionsPanel({
       <CardHeader
         title={title}
         subtitle={
-          compactHeader
-            ? `${sorted.length} open · ${formatSignedUsd(liveTotals.openPnl)} unrealized`
-            : "Live positions · mark-to-market"
+          loading
+            ? "Loading positions…"
+            : compactHeader
+              ? `${sorted.length} open · ${formatSignedUsd(liveTotals.openPnl)} unrealized`
+              : "Live positions · mark-to-market"
         }
         action={
           <div className="flex items-center gap-2">
@@ -317,6 +332,23 @@ export function OpenPositionsPanel({
         }
       />
       <CardBody className="flex flex-col gap-4">
+        {loading ? (
+          <div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading open positions">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-16 w-full rounded-lg" />
+              ))}
+            </div>
+            <Skeleton className="h-8 w-full rounded-lg" />
+            <Skeleton className="h-8 w-full rounded-lg" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+            </div>
+          </div>
+        ) : (
+          <>
         {showTotals ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-edge/70 bg-surface-2/50 px-3 py-2.5">
@@ -386,11 +418,16 @@ export function OpenPositionsPanel({
         </div>
 
         {sorted.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <p className="text-sm text-muted">
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-edge bg-surface-2/40 px-4 py-12 text-center">
+            <p className="text-sm font-semibold text-foreground">
               {positions.length === 0
-                ? "No open positions. Find a market to trade."
-                : "No positions match these filters."}
+                ? "You have no open positions yet"
+                : "No positions match these filters"}
+            </p>
+            <p className="max-w-sm text-xs text-muted">
+              {positions.length === 0
+                ? "Browse markets to place your first prediction market bet. Open positions from every provider appear here with live mark-to-market P&L."
+                : "Try clearing the tenor or provider filters to see all open bets."}
             </p>
             {positions.length === 0 ? (
               <Link
@@ -441,6 +478,8 @@ export function OpenPositionsPanel({
                 </tbody>
               </table>
             </div>
+          </>
+        )}
           </>
         )}
       </CardBody>

@@ -23,6 +23,10 @@ PYTHONPATH=. python scripts/seed_test_traders.py --traders-per-firm 5
 PYTHONPATH=. python scripts/seed_test_traders.py --tenant-slug apex --with-positions
 PYTHONPATH=. python scripts/seed_test_traders.py --no-positions
 PYTHONPATH=. python scripts/seed_test_traders.py --replace   # reset existing seed accounts
+
+# Local verification (SQLite — no Postgres required):
+PP_DATABASE_URL=sqlite+aiosqlite:///./verify_seed.db \
+  PYTHONPATH=. python3 scripts/verify_seed_portfolio.py
 ```
 
 ### Idempotency
@@ -40,3 +44,4 @@ Seeded traders use the same flow as other provisioned accounts. With
 `--replace` / first create under `IssuanceSource.MANUAL`, temporary credentials
 are generated but **not emailed** (`send_credentials_email=False`). Prefer the
 firm admin issuance UI or set a known password in local DB when you need UI login.
+To exercise welcome emails, use **Prop Firm Admin → Issue Account** (see root README).
