@@ -73,3 +73,8 @@ class Tenant(Base, UUIDTimestampMixin):
     sold_accounts = relationship(
         "SoldAccount", back_populates="tenant", cascade="all, delete-orphan"
     )
+    challenge_templates = relationship(
+        "PropFirmChallengeTemplate",
+        back_populates="prop_firm",
+        cascade="all, delete-orphan",
+    )

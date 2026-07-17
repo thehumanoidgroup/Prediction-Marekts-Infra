@@ -124,6 +124,7 @@ export function serializeChallengeConfig(row: PrismaChallengeConfig): ChallengeC
   return {
     id: row.id,
     propFirmAccountId: row.propFirmAccountId,
+    templateId: row.templateId ?? null,
     profitTarget: decimalToNumber(row.profitTarget),
     dailyDrawdown: decimalToNumber(row.dailyDrawdown),
     maxDrawdown: decimalToNumber(row.maxDrawdown),
@@ -133,6 +134,28 @@ export function serializeChallengeConfig(row: PrismaChallengeConfig): ChallengeC
       row.consistencyScore === null ? null : decimalToNumber(row.consistencyScore),
     otherCustomRules: (row.otherCustomRules ?? {}) as Record<string, unknown>,
     sp500Tickers,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializePropFirmChallengeTemplate(
+  row: import("@prisma/client").PropFirmChallengeTemplate,
+): import("@/types/provisioning").PropFirmChallengeTemplateRecord {
+  return {
+    id: row.id,
+    propFirmId: row.propFirmId,
+    modelType: toApiModelType(row.modelType),
+    profitTarget: decimalToNumber(row.profitTarget),
+    dailyDrawdown: decimalToNumber(row.dailyDrawdown),
+    maxDrawdown: decimalToNumber(row.maxDrawdown),
+    maxBetSizePerPick: decimalToNumber(row.maxBetSizePerPick),
+    maxBetSizeMode: toApiMaxBetMode(row.maxBetSizeMode),
+    maxBetSizeRules: (row.maxBetSizeRules as Record<string, unknown> | null) ?? null,
+    consistencyScore:
+      row.consistencyScore === null ? null : decimalToNumber(row.consistencyScore),
+    minTradingDays: row.minTradingDays,
+    otherRules: (row.otherRules ?? {}) as Record<string, unknown>,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

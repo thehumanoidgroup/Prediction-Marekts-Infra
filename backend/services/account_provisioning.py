@@ -19,6 +19,7 @@ from app.models import (
     ChallengeConfig,
     IssuanceSource,
     MarketProvider,
+    MaxBetSizeMode,
     PropFirmAccount,
     SoldAccount,
     Tenant,
@@ -33,6 +34,12 @@ from services.challenge_presets import (
     MODEL_TYPE_PRESETS,
     challenge_config_to_dict,
     resolve_challenge_rules,
+)
+from services.challenge_template_service import (
+    firm_template_rule_overrides,
+    get_template_for_model,
+    is_persisted_template,
+    normalize_model_type,
 )
 from services.email_service import AccountCredentialsEmail, send_account_credentials_email
 
@@ -168,20 +175,29 @@ def _merge_challenge_overrides(
     return merged or None
 
 
-async def preview_issuance_rules(
+async def _ensure_catalog_for_provider(
+    db: AsyncSession,
+    tenant: Tenant,
+    provider: MarketProvider,
+) -> None:
+    """Ensure provider-specific firm products exist before issuance."""
+    if provider is MarketProvider.KALSHI:
+        await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
+    elif provider is MarketProvider.SP500_DYNAMIC:
+        await ensure_tenant_account_catalog(db, tenant, include_sp500=True)
+    elif provider is MarketProvider.POLYMARKET:
+        await ensure_tenant_account_catalog(db, tenant, include_polymarket=True)
+
+
+async def _resolve_product_for_issuance(
     db: AsyncSession,
     *,
     tenant: Tenant,
     provider: MarketProvider,
-    account_size: int,
-    model_type: str = "1step",
-    template_config_id: str | None = None,
-    challenge_rules: dict[str, Any] | None = None,
     prop_firm_account_slug: str | None = None,
-) -> dict[str, Any]:
-    """Resolve the challenge rules that would apply for an issuance."""
-    if provider is MarketProvider.KALSHI:
-        await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
+) -> PropFirmAccount:
+    """Resolve the firm product used as the issuance base (all providers)."""
+    await _ensure_catalog_for_provider(db, tenant, provider)
 
     product: PropFirmAccount | None = None
     if prop_firm_account_slug:
@@ -196,6 +212,7 @@ async def preview_issuance_rules(
             tenant,
             include_kalshi=provider is MarketProvider.KALSHI,
             include_sp500=provider is MarketProvider.SP500_DYNAMIC,
+            include_polymarket=provider is MarketProvider.POLYMARKET,
         )
 
     loaded = await db.execute(
@@ -203,19 +220,131 @@ async def preview_issuance_rules(
         .where(PropFirmAccount.id == product.id)
         .options(selectinload(PropFirmAccount.challenge_config))
     )
-    product = loaded.scalar_one()
+    return loaded.scalar_one()
 
-    template = await _load_template_config(db, tenant.id, template_config_id)
-    base = challenge_config_to_dict(template or product.challenge_config)
+
+async def _resolve_issuance_rules(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    product: PropFirmAccount,
+    provider: MarketProvider,
+    account_size: float,
+    model_type: str,
+    template_config_id: str | None = None,
+    challenge_rules: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Merge product base + firm PropFirmChallengeTemplate + per-account overrides.
+
+    Priority (highest last): product/config template base → model presets →
+    firm ``PropFirmChallengeTemplate`` → request ``challenge_rules`` / builtin
+    stock-event template overrides.
+
+    Returns ``(resolved_rules, firm_template_id)``.
+    """
+    raw_model = str(model_type or "1step").strip().lower()
+    try:
+        mt = normalize_model_type(raw_model)
+        use_firm_template = True
+    except ValueError:
+        # Legacy / product defaults like ``evaluation`` have no firm template.
+        mt = raw_model or "1step"
+        use_firm_template = False
+
+    config_template = await _load_template_config(db, tenant.id, template_config_id)
+    base = challenge_config_to_dict(config_template or product.challenge_config)
     base["provider"] = provider.value
+
+    firm_overrides: dict[str, Any] = {}
+    template_id: str | None = None
+    firm_template = None
+    if use_firm_template:
+        firm_template = await get_template_for_model(db, tenant.id, mt)
+        firm_overrides = firm_template_rule_overrides(firm_template)
+        if is_persisted_template(firm_template):
+            template_id = firm_template.id
+
+    request_overrides = _merge_challenge_overrides(challenge_rules, template_config_id) or {}
+    # Per-account / request overrides win over the firm template.
+    merged_overrides = {**firm_overrides, **request_overrides}
 
     resolved = resolve_challenge_rules(
         base=base,
-        model_type=model_type,
+        model_type=mt,
         account_size=float(account_size),
-        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
+        overrides=merged_overrides or None,
     )
-    return _rules_to_preview(resolved, model_type=model_type, account_size=float(account_size))
+
+    # Fixed firm-template bet caps are absolute USD (do not scale with account size).
+    if (
+        firm_template is not None
+        and firm_template.max_bet_size_mode == MaxBetSizeMode.FIXED.value
+        and (not challenge_rules or challenge_rules.get("max_stake_per_order") is None)
+    ):
+        resolved["max_stake_per_order"] = float(firm_template.max_bet_size_per_pick)
+
+    # Explicit per-account stake overrides are absolute as sent by the dashboard/webhook.
+    if challenge_rules and challenge_rules.get("max_stake_per_order") is not None:
+        resolved["max_stake_per_order"] = float(challenge_rules["max_stake_per_order"])
+
+    return resolved, template_id
+
+
+def _should_create_issuance_challenge_config(
+    *,
+    issuance_source: IssuanceSource,
+    model_type: str | None,
+    template_config_id: str | None,
+    challenge_rules: dict[str, Any] | None,
+    product_model_type: str,
+) -> bool:
+    """Webhook purchases and manual admin issuance always mint a fresh config.
+
+    That ensures ``PropFirmChallengeTemplate`` rules are applied even when the
+    product's default model_type already matches the request.
+    """
+    if issuance_source in {IssuanceSource.WEBHOOK, IssuanceSource.MANUAL}:
+        return True
+    if template_config_id or challenge_rules:
+        return True
+    if model_type and model_type not in {product_model_type, "evaluation"}:
+        return True
+    return False
+
+
+async def preview_issuance_rules(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    provider: MarketProvider,
+    account_size: int,
+    model_type: str = "1step",
+    template_config_id: str | None = None,
+    challenge_rules: dict[str, Any] | None = None,
+    prop_firm_account_slug: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the challenge rules that would apply for an issuance."""
+    product = await _resolve_product_for_issuance(
+        db,
+        tenant=tenant,
+        provider=provider,
+        prop_firm_account_slug=prop_firm_account_slug,
+    )
+    resolved, _template_id = await _resolve_issuance_rules(
+        db,
+        tenant=tenant,
+        product=product,
+        provider=provider,
+        account_size=float(account_size),
+        model_type=model_type,
+        template_config_id=template_config_id,
+        challenge_rules=challenge_rules,
+    )
+    return _rules_to_preview(
+        resolved,
+        model_type=str(model_type or "1step"),
+        account_size=float(account_size),
+    )
 
 
 async def _create_issuance_challenge_config(
@@ -229,15 +358,24 @@ async def _create_issuance_challenge_config(
     template_config_id: str | None,
     challenge_rules: dict[str, Any] | None,
 ) -> ChallengeConfig:
-    template = await _load_template_config(db, tenant.id, template_config_id)
-    base = challenge_config_to_dict(template or product.challenge_config)
-    base["provider"] = provider.value
+    """Create a per-issuance ChallengeConfig from firm template + overrides.
 
-    resolved = resolve_challenge_rules(
-        base=base,
-        model_type=model_type,
+    Works for internal, kalshi, polymarket, and sp500_dynamic providers.
+    """
+    mt = str(model_type or "1step").strip().lower()
+    try:
+        mt = normalize_model_type(mt)
+    except ValueError:
+        pass
+    resolved, template_id = await _resolve_issuance_rules(
+        db,
+        tenant=tenant,
+        product=product,
+        provider=provider,
         account_size=account_size,
-        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
+        model_type=mt,
+        template_config_id=template_config_id,
+        challenge_rules=challenge_rules,
     )
 
     label_prefix = {
@@ -246,7 +384,26 @@ async def _create_issuance_challenge_config(
         MarketProvider.POLYMARKET: "Polymarket",
         MarketProvider.INTERNAL: "Internal",
     }.get(provider, provider.value)
-    label = f"{label_prefix} {model_type.upper()} ${int(account_size / 1000)}K"
+    label = f"{label_prefix} {mt.upper()} ${int(account_size / 1000)}K"
+
+    product_cfg = product.challenge_config
+    kalshi_tickers = product.kalshi_market_tickers or (
+        product_cfg.kalshi_market_tickers if product_cfg else None
+    )
+    polymarket_ids = product_cfg.polymarket_condition_ids if product_cfg else None
+    if provider is MarketProvider.SP500_DYNAMIC:
+        sp500_tickers = (
+            list(product_cfg.sp500_tickers)
+            if product_cfg and product_cfg.sp500_tickers
+            else list(DEFAULT_SP500_TICKERS)
+        )
+    else:
+        sp500_tickers = (
+            list(product_cfg.sp500_tickers)
+            if product_cfg and product_cfg.sp500_tickers
+            else None
+        )
+
     config = ChallengeConfig(
         tenant_id=tenant.id,
         name=label,
@@ -263,16 +420,12 @@ async def _create_issuance_challenge_config(
         max_total_exposure=resolved.get("max_total_exposure"),
         challenge_duration_days=int(resolved.get("challenge_duration_days", 60)),
         min_trading_days=int(resolved.get("min_trading_days", 10)),
-        model_type=model_type,
+        model_type=mt,
         min_consistency_score=resolved.get("min_consistency_score"),
-        kalshi_market_tickers=product.kalshi_market_tickers or product.challenge_config.kalshi_market_tickers,
-        sp500_tickers=(
-            list(product.challenge_config.sp500_tickers)
-            if product.challenge_config and product.challenge_config.sp500_tickers
-            else list(DEFAULT_SP500_TICKERS)
-            if provider is MarketProvider.SP500_DYNAMIC
-            else None
-        ),
+        template_id=template_id,
+        kalshi_market_tickers=kalshi_tickers,
+        polymarket_condition_ids=list(polymarket_ids) if polymarket_ids else None,
+        sp500_tickers=sp500_tickers,
     )
     db.add(config)
     await db.flush()
@@ -594,6 +747,7 @@ async def ensure_tenant_account_catalog(
     *,
     include_kalshi: bool = False,
     include_sp500: bool = False,
+    include_polymarket: bool = False,
 ) -> PropFirmAccount:
     """Idempotently seed challenge configs and the default firm account for a tenant."""
     result = await db.execute(
@@ -610,14 +764,17 @@ async def ensure_tenant_account_catalog(
             await _ensure_kalshi_product(db, tenant)
         if include_sp500:
             await _ensure_sp500_product(db, tenant)
+        if include_polymarket:
+            await _ensure_polymarket_product(db, tenant)
         return existing
 
     program = {**DEFAULT_PROGRAM, **(tenant.program or {})}
+    program_fields = _program_to_challenge_fields(program)
     internal_config = ChallengeConfig(
         tenant_id=tenant.id,
         name="Standard Evaluation",
         provider=MarketProvider.INTERNAL,
-        **_program_to_challenge_fields(program),
+        **program_fields,
     )
     db.add(internal_config)
     await db.flush()
@@ -635,9 +792,11 @@ async def ensure_tenant_account_catalog(
     db.add(internal_product)
 
     if include_kalshi:
-        await _ensure_kalshi_product(db, tenant, program_fields=_program_to_challenge_fields(program))
+        await _ensure_kalshi_product(db, tenant, program_fields=program_fields)
     if include_sp500:
-        await _ensure_sp500_product(db, tenant, program_fields=_program_to_challenge_fields(program))
+        await _ensure_sp500_product(db, tenant, program_fields=program_fields)
+    if include_polymarket:
+        await _ensure_polymarket_product(db, tenant, program_fields=program_fields)
 
     await db.flush()
     await db.refresh(internal_product, attribute_names=["challenge_config"])
@@ -734,6 +893,50 @@ async def _ensure_sp500_product(
         label="S&P 500 Dynamic Markets",
         description="Trade 0DTE and weekly S&P 500 stock-event prediction markets.",
         provider=MarketProvider.SP500_DYNAMIC,
+        is_default=False,
+        is_active=True,
+    )
+    db.add(product)
+    await db.flush()
+    return product
+
+
+async def _ensure_polymarket_product(
+    db: AsyncSession,
+    tenant: Tenant,
+    *,
+    program_fields: dict[str, Any] | None = None,
+) -> PropFirmAccount | None:
+    """Seed the Polymarket evaluation product for a tenant."""
+    result = await db.execute(
+        select(PropFirmAccount).where(
+            PropFirmAccount.tenant_id == tenant.id,
+            PropFirmAccount.slug == "polymarket",
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        return None
+
+    fields = program_fields or _program_to_challenge_fields(
+        {**DEFAULT_PROGRAM, **(tenant.program or {})}
+    )
+    poly_config = ChallengeConfig(
+        tenant_id=tenant.id,
+        name="Polymarket Evaluation",
+        provider=MarketProvider.POLYMARKET,
+        polymarket_condition_ids=None,
+        **fields,
+    )
+    db.add(poly_config)
+    await db.flush()
+
+    product = PropFirmAccount(
+        tenant_id=tenant.id,
+        challenge_config_id=poly_config.id,
+        slug="polymarket",
+        label="Polymarket Evaluation",
+        description="Trade linked Polymarket prediction markets.",
+        provider=MarketProvider.POLYMARKET,
         is_default=False,
         is_active=True,
     )
@@ -964,11 +1167,11 @@ async def provision_new_account(
 ) -> ProvisionResult:
     """Provision a trader evaluation account (new or existing user).
 
-    When ``provider="kalshi"``:
-    - Fetches live Kalshi markets for the requested categories
-    - Links the account to Kalshi as its market data source
-    - Applies challenge rules (model type, profit target, drawdowns, stake limits)
+    When ``model_type`` is provided (default ``1step``), fetches the firm's
+    ``PropFirmChallengeTemplate`` for that model and applies it to a new
+    ``ChallengeConfig``. Per-account ``challenge_rules`` overrides win.
 
+    Works for ``internal``, ``kalshi``, ``polymarket``, and ``sp500_dynamic``.
     Supports webhook purchases and manual Prop Firm Admin issuance.
     """
     resolved_provider = _parse_provider(provider)
@@ -976,42 +1179,34 @@ async def provision_new_account(
     if account_size_f <= 0:
         raise ValueError("account_size must be positive")
 
-    if resolved_provider is MarketProvider.KALSHI:
-        await ensure_tenant_account_catalog(db, tenant, include_kalshi=True)
-    elif resolved_provider is MarketProvider.SP500_DYNAMIC:
-        await ensure_tenant_account_catalog(db, tenant, include_sp500=True)
+    raw_model = str(model_type or "1step").strip().lower()
+    try:
+        resolved_model_type = normalize_model_type(raw_model)
+    except ValueError:
+        resolved_model_type = raw_model or "1step"
 
-    product: PropFirmAccount | None = None
-    if prop_firm_account_slug:
-        product = await get_prop_firm_account_by_slug(db, tenant.id, prop_firm_account_slug)
-    if product is None and resolved_provider is not MarketProvider.INTERNAL:
-        product = await get_prop_firm_account_for_provider(db, tenant.id, resolved_provider)
-    if product is None:
-        product = await get_default_prop_firm_account(db, tenant.id)
-    if product is None:
-        product = await ensure_tenant_account_catalog(
-            db,
-            tenant,
-            include_kalshi=resolved_provider is MarketProvider.KALSHI,
-            include_sp500=resolved_provider is MarketProvider.SP500_DYNAMIC,
-        )
-
-    loaded = await db.execute(
-        select(PropFirmAccount)
-        .where(PropFirmAccount.id == product.id)
-        .options(selectinload(PropFirmAccount.challenge_config))
+    product = await _resolve_product_for_issuance(
+        db,
+        tenant=tenant,
+        provider=resolved_provider,
+        prop_firm_account_slug=prop_firm_account_slug,
     )
-    product = loaded.scalar_one()
 
     issuance_config: ChallengeConfig | None = None
-    if template_config_id or challenge_rules or model_type not in {product.challenge_config.model_type, "evaluation"}:
+    if _should_create_issuance_challenge_config(
+        issuance_source=issuance_source,
+        model_type=resolved_model_type,
+        template_config_id=template_config_id,
+        challenge_rules=challenge_rules,
+        product_model_type=product.challenge_config.model_type,
+    ):
         issuance_config = await _create_issuance_challenge_config(
             db,
             tenant=tenant,
             product=product,
             provider=resolved_provider,
             account_size=account_size_f,
-            model_type=model_type,
+            model_type=resolved_model_type,
             template_config_id=template_config_id,
             challenge_rules=challenge_rules,
         )
@@ -1021,7 +1216,7 @@ async def provision_new_account(
         tenant=tenant,
         provider=resolved_provider,
         account_size=int(account_size_f),
-        model_type=model_type,
+        model_type=resolved_model_type,
         template_config_id=template_config_id,
         challenge_rules=challenge_rules,
         prop_firm_account_slug=prop_firm_account_slug,
@@ -1059,7 +1254,7 @@ async def provision_new_account(
         kalshi_tickers=kalshi_tickers,
         replace_existing=replace_existing,
         challenge_config_id=issuance_config.id if issuance_config else None,
-        model_type=model_type,
+        model_type=resolved_model_type,
     )
 
     from app.core.config import get_settings
@@ -1100,6 +1295,10 @@ async def provision_new_account(
         sold_meta["sp500_tickers"] = list(sp500_tickers)
     if resolved_provider is MarketProvider.SP500_DYNAMIC:
         sold_meta["sp500_dynamic_enabled"] = True
+    if issuance_config is not None:
+        sold_meta["challenge_config_id"] = issuance_config.id
+        if issuance_config.template_id:
+            sold_meta["firm_template_id"] = issuance_config.template_id
 
     sold_record = await _log_sold_account(
         db,
@@ -1109,7 +1308,7 @@ async def provision_new_account(
         provider=resolved_provider,
         issuance_source=issuance_source,
         account_size=account_size_f,
-        model_type=model_type,
+        model_type=resolved_model_type,
         kalshi_tickers=account.effective_kalshi_tickers(),
         credentials_generated=bool(temporary_password),
         email_sent=email_sent,

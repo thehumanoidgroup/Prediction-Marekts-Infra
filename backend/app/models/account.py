@@ -44,12 +44,92 @@ class StockExpirationType(str, enum.Enum):
     WEEKLY = "weekly"
 
 
+class PropFirmModelTypeChoice(str, enum.Enum):
+    """Evaluation program tier for per-firm challenge templates."""
+
+    ONE_STEP = "1step"
+    TWO_STEP = "2step"
+    THREE_STEP = "3step"
+    INSTANT = "instant"
+
+
+class MaxBetSizeMode(str, enum.Enum):
+    """How ``max_bet_size_per_pick`` is interpreted on a template."""
+
+    PERCENT = "percent"
+    FIXED = "fixed"
+
+
+class PropFirmChallengeTemplate(Base, UUIDTimestampMixin):
+    """Per-prop-firm challenge rule template keyed by model type.
+
+    Unique on ``(prop_firm_id, model_type)``. Issued :class:`ChallengeConfig`
+    rows may optionally reference a template for override tracking.
+    """
+
+    __tablename__ = "prop_firm_challenge_templates"
+    __table_args__ = (
+        UniqueConstraint(
+            "prop_firm_id",
+            "model_type",
+            name="uq_prop_firm_challenge_templates_firm_model",
+        ),
+    )
+
+    prop_firm_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    model_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    profit_target: Mapped[float] = mapped_column(Float, nullable=False)
+    daily_drawdown: Mapped[float] = mapped_column(Float, nullable=False)
+    max_drawdown: Mapped[float] = mapped_column(Float, nullable=False)
+    max_bet_size_per_pick: Mapped[float] = mapped_column(Float, nullable=False)
+    max_bet_size_mode: Mapped[str] = mapped_column(
+        String(16), default=MaxBetSizeMode.PERCENT.value, nullable=False
+    )
+    # Optional JSON for advanced % / fixed / tiered stake rules.
+    max_bet_size_rules: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    min_trading_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    other_rules: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    prop_firm = relationship("Tenant", back_populates="challenge_templates")
+    challenge_configs = relationship(
+        "ChallengeConfig",
+        back_populates="template",
+        foreign_keys="ChallengeConfig.template_id",
+    )
+
+    def to_challenge_fields(self) -> dict[str, Any]:
+        """Map template columns onto ChallengeConfig / program rule keys."""
+        return {
+            "profit_target_pct": float(self.profit_target),
+            "max_daily_loss_pct": float(self.daily_drawdown),
+            "max_drawdown_pct": float(self.max_drawdown),
+            "max_stake_per_order": float(self.max_bet_size_per_pick)
+            if self.max_bet_size_mode == MaxBetSizeMode.FIXED.value
+            else None,
+            "min_consistency_score": self.consistency_score,
+            "min_trading_days": self.min_trading_days,
+            "model_type": self.model_type,
+            "other_rules": dict(self.other_rules or {}),
+            "max_bet_size_mode": self.max_bet_size_mode,
+            "max_bet_size_per_pick": float(self.max_bet_size_per_pick),
+            "max_bet_size_rules": self.max_bet_size_rules,
+        }
+
+
 class ChallengeConfig(Base, UUIDTimestampMixin):
     """Reusable challenge rules template, optionally scoped to a market provider.
 
     Firms define one or more configs (e.g. "$25K Internal", "$50K Kalshi").
     Provider-specific fields (``kalshi_market_tickers``, etc.) restrict which
     external markets traders may access during evaluation.
+
+    When ``template_id`` is set, the config was seeded from a
+    :class:`PropFirmChallengeTemplate` (override tracking).
     """
 
     __tablename__ = "challenge_configs"
@@ -82,6 +162,13 @@ class ChallengeConfig(Base, UUIDTimestampMixin):
     model_type: Mapped[str] = mapped_column(String(64), default="evaluation", nullable=False)
     min_consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Optional link to per-firm / per-model-type template (override tracking).
+    template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("prop_firm_challenge_templates.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+
     # Provider-specific market allowlists (optional).
     kalshi_market_tickers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     polymarket_condition_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -96,6 +183,11 @@ class ChallengeConfig(Base, UUIDTimestampMixin):
     expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     tenant = relationship("Tenant", back_populates="challenge_configs")
+    template = relationship(
+        "PropFirmChallengeTemplate",
+        back_populates="challenge_configs",
+        foreign_keys=[template_id],
+    )
     prop_firm_accounts = relationship("PropFirmAccount", back_populates="challenge_config")
     trader_accounts = relationship("TraderDemoAccount", back_populates="challenge_config")
 

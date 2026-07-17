@@ -98,7 +98,7 @@ Automated prop firm account provisioning: sold evaluations, encrypted credential
 
 **Super Admin UI:** `/platform/provisioning` — manual provisioning, audit log, recent accounts.
 
-**Prop Firm Admin UI:** `/admin/accounts` — issue Kalshi demo accounts; `/admin/provisioning` — firm defaults.
+**Prop Firm Admin UI:** `/admin/accounts` — issue evaluation accounts; `/admin/provisioning` — firm defaults; `/admin/challenge-templates` — per-model-type challenge rules.
 
 ```bash
 # Example webhook (after npx prisma db push and seed)
@@ -124,6 +124,26 @@ Key environment variables:
 | `PROVISIONING_WEBHOOK_RATE_LIMIT` | Max webhook requests per window (default 60/min) |
 
 See `lib/provisioning/README.md` for the full provisioning architecture.
+
+### Per-Model-Type Challenge Rules
+
+Each prop firm can save a **challenge template** per evaluation model (`1step`, `2step`, `3step`, `instant`). Templates drive profit targets, daily/max drawdown, max bet size, consistency, min trading days, and optional JSON policies.
+
+| Surface | Path |
+| --- | --- |
+| Firm Admin editor | `/admin/challenge-templates` |
+| Issue New Account prefill | `/admin/accounts` → Issue New Account |
+| Super Admin audit (read-only) | `/platform/firms/[id]` |
+| APIs | `GET/PUT/DELETE /api/admin/challenge-templates[/{modelType}]` |
+
+**Resolution order at issuance** (highest priority last):
+
+1. Platform preset for the model type  
+2. Firm program defaults (`Tenant.program`) and Prop Firm Settings  
+3. Saved `PropFirmChallengeTemplate` for that model (when present)  
+4. Per-account overrides (`custom_rules` on webhook, or edited fields on manual issuance)
+
+Webhook purchases and manual issuance share the same fallback. Max drawdown must be **greater than** daily drawdown. Issued accounts register those limits on the in-process risk engine (`lib/engine/risk.ts`); Python trading uses the FastAPI risk engine with the same template wiring.
 
 ## Multi-tenancy
 

@@ -1,13 +1,36 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { prisma } from "@/lib/db";
+import { ensureSeeded } from "@/lib/seed";
 import { getFirmDetail } from "@/lib/services";
+import { getAllTemplatesForPropFirm } from "@/lib/provisioning/challenge-template-service";
 import { formatCompactUsd, formatDate, formatPct, formatSignedUsd, formatUsd } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
 import { TradersTable } from "@/components/admin/traders-table";
+import { FirmChallengeTemplatesReadonly } from "@/components/platform/firm-challenge-templates-readonly";
 import { IconChevronLeft } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
+import type { ChallengeTemplateView } from "@/lib/provisioning/challenge-template-defaults";
+
+async function loadFirmChallengeTemplates(
+  firmId: string,
+  firmSlug: string,
+): Promise<ChallengeTemplateView[] | null> {
+  if (!process.env.DATABASE_URL) return null;
+
+  await ensureSeeded();
+  const tenant = await prisma.tenant.findFirst({
+    where: {
+      isActive: true,
+      OR: [{ id: firmId }, { slug: firmSlug }],
+    },
+    select: { id: true },
+  });
+  if (!tenant) return null;
+  return getAllTemplatesForPropFirm(tenant.id);
+}
 
 export default async function PlatformFirmDetailPage({
   params,
@@ -17,6 +40,8 @@ export default async function PlatformFirmDetailPage({
   const { id } = await params;
   const firm = getFirmDetail(id);
   if (!firm) notFound();
+
+  const challengeTemplates = await loadFirmChallengeTemplates(firm.id, firm.slug);
 
   const kpis: Stat[] = [
     {
@@ -90,6 +115,26 @@ export default async function PlatformFirmDetailPage({
       </div>
 
       <StatCards stats={kpis} />
+
+      {challengeTemplates ? (
+        <FirmChallengeTemplatesReadonly
+          templates={challengeTemplates}
+          firmName={firm.name}
+        />
+      ) : (
+        <Card>
+          <CardHeader
+            title="Challenge Rules by Model Type"
+            subtitle="Database required for template audit view"
+            action={<Badge tone="neutral">Read-only</Badge>}
+          />
+          <CardBody>
+            <p className="text-sm text-muted">
+              Connect a database to inspect this firm&apos;s challenge templates.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader

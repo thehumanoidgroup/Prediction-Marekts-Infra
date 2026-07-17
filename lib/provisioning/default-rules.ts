@@ -23,6 +23,20 @@ export interface DefaultRulesContext {
   firmModelDefaults?: ModelTypeDefaults;
   /** Firm-wide custom JSON defaults from PropFirmSettings. */
   firmDefaultCustomRules?: Record<string, unknown>;
+  /**
+   * Saved PropFirmChallengeTemplate for this model type (when present).
+   * Applied after PropFirmSettings model defaults and before purchase overrides.
+   */
+  firmChallengeTemplate?: {
+    profitTarget: number;
+    dailyDrawdown: number;
+    maxDrawdown: number;
+    maxBetSizePerPick: number;
+    maxBetSizeMode: "percent" | "fixed";
+    consistencyScore?: number | null;
+    minTradingDays?: number | null;
+    otherRules?: Record<string, unknown>;
+  };
   /** Prop firm JSON overrides (webhook payload or admin form). */
   customRules?: Record<string, unknown>;
 }
@@ -106,20 +120,63 @@ function modelDefaultsToFlatCustom(defaults: ModelTypeDefaults): Record<string, 
   return rules;
 }
 
+function firmTemplateToFlatCustom(
+  template: NonNullable<DefaultRulesContext["firmChallengeTemplate"]>,
+): Record<string, unknown> {
+  const other = template.otherRules ?? {};
+  const flat: Record<string, unknown> = {
+    profitTarget: template.profitTarget,
+    dailyDrawdown: template.dailyDrawdown,
+    maxDrawdown: template.maxDrawdown,
+    maxBetSizeValue: template.maxBetSizePerPick,
+    maxBetSizeMode: template.maxBetSizeMode,
+    consistencyScore: template.consistencyScore,
+    minTradingDays: template.minTradingDays,
+  };
+  // Accept both snake_case (Python template other_rules) and camelCase keys.
+  if (other.drawdown_mode != null) flat.drawdownMode = other.drawdown_mode;
+  if (other.drawdownMode != null) flat.drawdownMode = other.drawdownMode;
+  if (other.profit_split_pct != null) flat.profitSplitPct = other.profit_split_pct;
+  if (other.profitSplitPct != null) flat.profitSplitPct = other.profitSplitPct;
+  if (other.challenge_duration_days != null) {
+    flat.challengeDurationDays = other.challenge_duration_days;
+  }
+  if (other.challengeDurationDays != null) {
+    flat.challengeDurationDays = other.challengeDurationDays;
+  }
+  if (other.max_exposure_per_market != null) {
+    flat.maxExposurePerMarket = other.max_exposure_per_market;
+  }
+  if (other.maxExposurePerMarket != null) {
+    flat.maxExposurePerMarket = other.maxExposurePerMarket;
+  }
+  if (template.maxBetSizeMode === "fixed") {
+    flat.maxStakePerOrder = template.maxBetSizePerPick;
+  }
+  return flat;
+}
+
 /**
  * Build the baseline ChallengeConfig for a sold account before firm overrides.
+ *
+ * Precedence (highest last):
+ * platform preset → firm program → PropFirmSettings defaults →
+ * PropFirmChallengeTemplate → purchase / admin customRules
  */
 export function resolveDefaultChallengeConfig(ctx: DefaultRulesContext): ChallengeConfigInput {
   const preset = MODEL_PRESETS[ctx.modelType];
   const firm = ctx.firmProgram ?? {};
   const modelDefaults = ctx.firmModelDefaults ?? {};
   const firmCustom = ctx.firmDefaultCustomRules ?? {};
+  const templateFlat = ctx.firmChallengeTemplate
+    ? firmTemplateToFlatCustom(ctx.firmChallengeTemplate)
+    : {};
   const purchase = ctx.customRules ?? {};
 
-  // Precedence: purchase overrides → firm default custom → per-model defaults → program → platform preset
   const custom = {
     ...firmCustom,
     ...modelDefaultsToFlatCustom(modelDefaults),
+    ...templateFlat,
     ...purchase,
   };
 
@@ -203,6 +260,8 @@ export function mergeChallengeConfig(
       overrides.consistencyScore !== undefined
         ? overrides.consistencyScore
         : base.consistencyScore,
+    templateId:
+      overrides.templateId !== undefined ? overrides.templateId : base.templateId,
     otherCustomRules: {
       ...base.otherCustomRules,
       ...(overrides.otherCustomRules ?? {}),

@@ -93,9 +93,11 @@ Per-firm provisioning defaults live in the `prop_firm_settings` table (1:1 with 
 | `allowedOverrideFields` | `custom_rules` keys purchasers may override |
 | `defaultCustomRules` | Firm-wide JSON merged into every account |
 
-Resolution order at provisioning: platform preset → `Tenant.program` → `PropFirmSettings.modelDefaults` → filtered purchase `custom_rules`.
+Resolution order at provisioning: platform preset → `Tenant.program` → `PropFirmSettings.modelDefaults` → **`PropFirmChallengeTemplate`** (per model) → filtered purchase `custom_rules`.
 
-Configure from **Prop Firm Admin → Provisioning** (`/admin/provisioning`) or `PATCH /api/admin/provisioning-settings`.
+Configure model templates from **Prop Firm Admin → Challenge Rules by Model Type** (`/admin/challenge-templates`) or `PUT /api/admin/challenge-templates/{modelType}`. Max drawdown must exceed daily drawdown.
+
+Configure sizes / override policy from **Prop Firm Admin → Provisioning** (`/admin/provisioning`) or `PATCH /api/admin/provisioning-settings`.
 
 ## Security and validation
 

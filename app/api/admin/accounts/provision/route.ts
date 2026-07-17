@@ -13,6 +13,9 @@ import {
   normalizeProvider,
   splitProviderMeta,
 } from "@/lib/provisioning/challenge-rules";
+import { getTemplateForModel } from "@/lib/provisioning/challenge-template-service";
+import { firmTemplateToChallengeRulesInput } from "@/lib/provisioning/firm-template-rules";
+import { defaultVirtualBalance } from "@/lib/provisioning/serialize";
 import { DEFAULT_SP500_TICKERS, getSp500ChallengeTemplate } from "@/lib/sp500/challenge-templates";
 import { provisionNewAccount } from "@/services/account-provisioning";
 
@@ -43,6 +46,12 @@ export async function POST(request: NextRequest) {
   const accountSize = numericAccountSizeToApi(
     typeof payload.account_size === "number" ? payload.account_size : 25_000,
   );
+  const accountSizeUsd = defaultVirtualBalance(accountSize);
+
+  const firmTemplate = await getTemplateForModel(tenant.id, modelType);
+  const firmRules = normalizeChallengeRulesInput(
+    firmTemplateToChallengeRulesInput(firmTemplate, accountSizeUsd) as Record<string, unknown>,
+  );
 
   const rawRules =
     payload.challenge_rules && typeof payload.challenge_rules === "object"
@@ -70,6 +79,7 @@ export async function POST(request: NextRequest) {
     : {};
 
   const { customRules, providerMeta } = splitProviderMeta({
+    ...firmRules,
     ...templateRules,
     ...rawRules,
     provider,
@@ -94,6 +104,7 @@ export async function POST(request: NextRequest) {
       sp500Tickers,
       customRules,
       challengeConfigOverrides: {
+        templateId: firmTemplate.isDefault ? null : firmTemplate.id,
         otherCustomRules: {
           provider,
           ...(sp500Tickers ? { sp500Tickers } : {}),
