@@ -1277,7 +1277,14 @@ async def provision_new_account(
     email_sent = False
     if send_credentials_email and (created_user or issuance_source is IssuanceSource.MANUAL):
         settings = get_settings()
-        login_url = f"{settings.trader_login_base_url.rstrip('/')}?tenant={tenant.slug}"
+        base = settings.trader_login_base_url.rstrip("/")
+        # Prefer a path-style login URL; fall back to query tenant for white-label.
+        if "/login" in base:
+            login_url = f"{base}?tenant={tenant.slug}"
+            dashboard_url = f"{base.rsplit('/login', 1)[0]}/dashboard?tenant={tenant.slug}"
+        else:
+            login_url = f"{base}/login?tenant={tenant.slug}"
+            dashboard_url = f"{base}/dashboard?tenant={tenant.slug}"
         email_sent = await send_account_credentials_email(
             AccountCredentialsEmail(
                 to_email=user.email,
@@ -1287,6 +1294,9 @@ async def provision_new_account(
                 account_size=account_size_f,
                 login_url=login_url,
                 temporary_password=temporary_password if created_user else None,
+                model_type=resolved_model_type,
+                dashboard_url=dashboard_url,
+                challenge_rules=dict(applied_rules or {}),
             )
         )
 

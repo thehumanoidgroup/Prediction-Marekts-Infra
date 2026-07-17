@@ -3,12 +3,16 @@
  *
  * Equivalent of the requested `backend/services/email_service.py`.
  * Uses Resend in production; logs to console when `RESEND_API_KEY` is unset.
+ *
+ * Called automatically after Prop Firm Admin "Issue Account" succeeds
+ * (`sendEmails` defaults to true in `provisionNewAccount`).
  */
 
 import { deliverEmail } from "@/lib/email/send";
 import {
   renderPropFirmNotificationEmail,
   renderTraderCredentialsEmail,
+  resolveProviderFromAccount,
   type EmailTemplateContext,
 } from "@/lib/email/templates";
 import { prisma } from "@/lib/db";
@@ -28,6 +32,10 @@ export interface ProvisioningEmailInput {
   supportContact?: string;
   /** Override prop firm notification recipient. */
   propFirmNotifyEmail?: string;
+  /** Tenant slug for dashboard / login deep links. */
+  tenantSlug?: string;
+  /** Market provider for this evaluation (internal / kalshi / …). */
+  provider?: string;
 }
 
 export interface ProvisioningEmailResult {
@@ -35,19 +43,39 @@ export interface ProvisioningEmailResult {
   propFirm: { sent: boolean; messageId?: string; recipient?: string };
 }
 
+function appBaseUrl(tenantSlug?: string): string {
+  const configured = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  if (tenantSlug) return `https://${tenantSlug}.proppredict.com`;
+  return "http://localhost:3000";
+}
+
+function buildDashboardUrl(appUrl: string, tenantSlug?: string, propFirmId?: string): string {
+  const tenant = tenantSlug || propFirmId;
+  return tenant
+    ? `${appUrl}/dashboard?tenant=${encodeURIComponent(tenant)}`
+    : `${appUrl}/dashboard`;
+}
+
 function buildContext(
   input: ProvisioningEmailInput,
   supportContact: string,
 ): EmailTemplateContext {
+  const appUrl = appBaseUrl(input.tenantSlug);
+  const provider =
+    input.provider ??
+    resolveProviderFromAccount(input.account) ??
+    "internal";
+
   return {
     firmName: input.firmName,
     supportContact,
-    appUrl:
-      process.env.APP_URL ??
-      process.env.NEXT_PUBLIC_APP_URL ??
-      "http://localhost:3000",
+    appUrl,
+    dashboardUrl: buildDashboardUrl(appUrl, input.tenantSlug, input.propFirmId),
     virtualBalance: input.virtualBalance,
     challengeConfig: input.challengeConfig,
+    provider,
+    tenantSlug: input.tenantSlug,
   };
 }
 

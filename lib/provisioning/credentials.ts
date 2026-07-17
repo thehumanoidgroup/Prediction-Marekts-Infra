@@ -24,6 +24,13 @@ function appBaseUrl(tenantSlug?: string): string {
   return "http://localhost:3000";
 }
 
+function buildLoginPageUrl(tenantSlug?: string): string {
+  const base = appBaseUrl(tenantSlug);
+  return tenantSlug
+    ? `${base}/login?tenant=${encodeURIComponent(tenantSlug)}`
+    : `${base}/login`;
+}
+
 export function generateSecurePassword(length = 20): string {
   return randomBytes(Math.ceil(length * 0.75))
     .toString("base64url")
@@ -55,13 +62,15 @@ export async function generateLoginCredentials(options: {
   tenantSlug?: string;
   mode?: LoginDeliveryMode;
 }): Promise<GeneratedCredentials> {
-  const loginUrl = appBaseUrl(options.tenantSlug);
+  const loginUrl = buildLoginPageUrl(options.tenantSlug);
   const username = options.traderEmail.toLowerCase();
   const mode = options.mode ?? "password";
 
   if (mode === "magic_link") {
     const token = await generateMagicLinkToken(username, options.propFirmAccountId);
-    const magicLink = `${loginUrl}/login?token=${encodeURIComponent(token)}`;
+    const magicLink = `${appBaseUrl(options.tenantSlug)}/login?token=${encodeURIComponent(token)}${
+      options.tenantSlug ? `&tenant=${encodeURIComponent(options.tenantSlug)}` : ""
+    }`;
     return {
       username,
       magicLink,

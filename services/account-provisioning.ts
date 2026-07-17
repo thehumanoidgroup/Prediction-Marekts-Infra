@@ -403,7 +403,12 @@ export async function provisionNewAccount(
         firmName: firmConfig.name,
         propFirmId: data.propFirmId,
         virtualBalance,
-        challengeConfig,
+        challengeConfig: {
+          ...challengeConfig,
+          otherCustomRules,
+        },
+        tenantSlug: firm.slug,
+        provider,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Email delivery failed";
