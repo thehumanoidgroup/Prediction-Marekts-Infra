@@ -145,6 +145,19 @@ Each prop firm can save a **challenge template** per evaluation model (`1step`, 
 
 Webhook purchases and manual issuance share the same fallback. Max drawdown must be **greater than** daily drawdown. Issued accounts register those limits on the in-process risk engine (`lib/engine/risk.ts`); Python trading uses the FastAPI risk engine with the same template wiring.
 
+### Seed test traders (FastAPI)
+
+Idempotent script that creates 3–5 test traders for **every prop firm**, distributes model types evenly (`1step` / `2step` / `3step` / `instant`), applies each firm’s `PropFirmChallengeTemplate`, provisions via `provision_new_account`, and optionally places sample LMSR positions for Portfolio.
+
+```bash
+cd backend
+PYTHONPATH=. python scripts/seed_test_traders.py
+PYTHONPATH=. python scripts/seed_test_traders.py --traders-per-firm 5 --tenant-slug apex
+PYTHONPATH=. python scripts/seed_test_traders.py --no-positions
+```
+
+See `backend/scripts/README.md` for flags, idempotency keys, and notes.
+
 ## Multi-tenancy
 
 Tenant resolution order (see `middleware.ts`):
