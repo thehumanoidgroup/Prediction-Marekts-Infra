@@ -26,6 +26,39 @@ export interface ChallengeConfigInput {
   maxBetSizeMode?: MaxBetSizeMode;
   consistencyScore?: number | null;
   otherCustomRules?: Record<string, unknown>;
+  /** Optional link to PropFirmChallengeTemplate for override tracking. */
+  templateId?: string | null;
+}
+
+export interface PropFirmChallengeTemplateInput {
+  propFirmId: string;
+  modelType: PropFirmModelType;
+  profitTarget: number;
+  dailyDrawdown: number;
+  maxDrawdown: number;
+  maxBetSizePerPick: number;
+  maxBetSizeMode?: MaxBetSizeMode;
+  maxBetSizeRules?: Record<string, unknown> | null;
+  consistencyScore?: number | null;
+  minTradingDays?: number | null;
+  otherRules?: Record<string, unknown>;
+}
+
+export interface PropFirmChallengeTemplateRecord {
+  id: string;
+  propFirmId: string;
+  modelType: PropFirmModelType;
+  profitTarget: number;
+  dailyDrawdown: number;
+  maxDrawdown: number;
+  maxBetSizePerPick: number;
+  maxBetSizeMode: MaxBetSizeMode;
+  maxBetSizeRules: Record<string, unknown> | null;
+  consistencyScore: number | null;
+  minTradingDays: number | null;
+  otherRules: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PropFirmAccountInput {
@@ -55,6 +88,7 @@ export interface PropFirmAccountRecord {
 export interface ChallengeConfigRecord {
   id: string;
   propFirmAccountId: string;
+  templateId?: string | null;
   profitTarget: number;
   dailyDrawdown: number;
   maxDrawdown: number;

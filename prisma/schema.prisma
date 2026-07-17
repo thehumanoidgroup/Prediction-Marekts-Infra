@@ -90,6 +90,7 @@ model Tenant {
   propFirmAccounts PropFirmAccount[]
   apiKeys          PropFirmApiKey[]
   settings         PropFirmSettings?
+  challengeTemplates PropFirmChallengeTemplate[]
 
   @@map("tenants")
 }
@@ -128,6 +129,35 @@ model PropFirmSettings {
   updatedAt             DateTime            @updatedAt @map("updated_at")
 
   @@map("prop_firm_settings")
+}
+
+/// Per-prop-firm challenge rule template keyed by evaluation model type.
+/// One row per (prop_firm_id, model_type); sold accounts may link via ChallengeConfig.templateId.
+model PropFirmChallengeTemplate {
+  id                String            @id @default(uuid())
+  propFirmId        String            @map("prop_firm_id")
+  propFirm          Tenant            @relation(fields: [propFirmId], references: [id], onDelete: Cascade)
+  modelType         PropFirmModelType @map("model_type")
+  profitTarget      Decimal           @map("profit_target") @db.Decimal(8, 4)
+  dailyDrawdown     Decimal           @map("daily_drawdown") @db.Decimal(8, 4)
+  maxDrawdown       Decimal           @map("max_drawdown") @db.Decimal(8, 4)
+  /// Numeric stake limit; interpret with maxBetSizeMode (percent of balance vs fixed USD).
+  maxBetSizePerPick Decimal           @map("max_bet_size_per_pick") @db.Decimal(14, 2)
+  maxBetSizeMode    MaxBetSizeMode    @default(percent) @map("max_bet_size_mode")
+  /// Optional structured max-bet payload for advanced % / fixed / tiered rules.
+  maxBetSizeRules   Json?             @map("max_bet_size_rules")
+  consistencyScore  Decimal?          @map("consistency_score") @db.Decimal(8, 4)
+  minTradingDays    Int?              @map("min_trading_days")
+  /// Future custom rules (exposure caps, news blackouts, etc.).
+  otherRules        Json              @default("{}") @map("other_rules")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  challengeConfigs  ChallengeConfig[]
+
+  @@unique([propFirmId, modelType])
+  @@index([propFirmId])
+  @@index([modelType])
+  @@map("prop_firm_challenge_templates")
 }
 
 model User {
@@ -181,30 +211,34 @@ model PropFirmAccount {
 
 /// Challenge rules attached to a single sold account.
 model ChallengeConfig {
-  id                 String               @id @default(uuid())
-  propFirmAccountId  String               @unique @map("prop_firm_account_id")
-  propFirmAccount    PropFirmAccount      @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
-  profitTarget       Decimal              @map("profit_target") @db.Decimal(8, 4)
-  dailyDrawdown      Decimal              @map("daily_drawdown") @db.Decimal(8, 4)
-  maxDrawdown        Decimal              @map("max_drawdown") @db.Decimal(8, 4)
-  maxBetSizeValue    Decimal              @map("max_bet_size_value") @db.Decimal(14, 2)
-  maxBetSizeMode     MaxBetSizeMode       @default(percent) @map("max_bet_size_mode")
-  consistencyScore   Decimal?             @map("consistency_score") @db.Decimal(8, 4)
-  otherCustomRules   Json                 @default("{}") @map("other_custom_rules")
+  id                 String                     @id @default(uuid())
+  propFirmAccountId  String                     @unique @map("prop_firm_account_id")
+  propFirmAccount    PropFirmAccount            @relation(fields: [propFirmAccountId], references: [id], onDelete: Cascade)
+  /// Optional link to the firm/model template this config was copied from (override tracking).
+  templateId         String?                    @map("template_id")
+  template           PropFirmChallengeTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  profitTarget       Decimal                    @map("profit_target") @db.Decimal(8, 4)
+  dailyDrawdown      Decimal                    @map("daily_drawdown") @db.Decimal(8, 4)
+  maxDrawdown        Decimal                    @map("max_drawdown") @db.Decimal(8, 4)
+  maxBetSizeValue    Decimal                    @map("max_bet_size_value") @db.Decimal(14, 2)
+  maxBetSizeMode     MaxBetSizeMode             @default(percent) @map("max_bet_size_mode")
+  consistencyScore   Decimal?                   @map("consistency_score") @db.Decimal(8, 4)
+  otherCustomRules   Json                       @default("{}") @map("other_custom_rules")
   /// Market provider defaults for this challenge (multi-provider compatible).
-  provider           MarketProvider       @default(internal)
+  provider           MarketProvider             @default(internal)
   /// Optional S&P 500 ticker allowlist when provider = sp500_dynamic.
-  sp500Tickers       Json?                @map("sp500_tickers")
-  stockTicker        String?              @map("stock_ticker")
-  strikePrice        Decimal?             @map("strike_price") @db.Decimal(14, 4)
-  expirationType     StockExpirationType? @map("expiration_type")
-  expirationDate     DateTime?            @map("expiration_date") @db.Date
-  createdAt          DateTime             @default(now()) @map("created_at")
-  updatedAt          DateTime             @updatedAt @map("updated_at")
+  sp500Tickers       Json?                      @map("sp500_tickers")
+  stockTicker        String?                    @map("stock_ticker")
+  strikePrice        Decimal?                   @map("strike_price") @db.Decimal(14, 4)
+  expirationType     StockExpirationType?       @map("expiration_type")
+  expirationDate     DateTime?                  @map("expiration_date") @db.Date
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
   traderDemoAccounts TraderDemoAccount[]
 
   @@index([provider])
   @@index([stockTicker])
+  @@index([templateId])
   @@map("challenge_configs")
 }
 
