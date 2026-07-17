@@ -1,7 +1,8 @@
 """Outbound email helpers for account provisioning.
 
-Mirrors the Next.js ``services/email.ts`` provisioning flow. In development the
-message is logged; production hooks into your ESP (SendGrid, SES, Resend, etc.).
+Mirrors the Next.js ``services/email.ts`` / ``lib/email/templates.ts`` flow.
+In development the message is logged; production hooks into your ESP
+(SendGrid, SES, Resend, etc.).
 """
 
 from __future__ import annotations
@@ -44,6 +45,24 @@ class AccountCredentialsEmail:
     dashboard_url: str | None = None
     challenge_rules: dict[str, Any] = field(default_factory=dict)
     magic_link: str | None = None
+    support_contact: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PropFirmIssuanceCopyEmail:
+    """Optional confirmation copy for the issuing prop firm admin."""
+
+    to_email: str
+    tenant_name: str
+    trader_email: str
+    provider: str
+    account_size: float
+    model_type: str = "1step"
+    account_id: str | None = None
+    challenge_rules: dict[str, Any] = field(default_factory=dict)
+    issued_by_name: str | None = None
+    dashboard_url: str | None = None
+    support_contact: str | None = None
 
 
 def _format_provider(provider: str) -> str:
@@ -79,33 +98,68 @@ def _rules_summary(rules: dict[str, Any]) -> list[str]:
     return lines
 
 
+def trader_credentials_subject(tenant_name: str) -> str:
+    return f"Your {tenant_name} Prediction Markets Account is Ready"
+
+
 def render_credentials_email_text(payload: AccountCredentialsEmail) -> str:
-    """Plain-text body used for logs and ESP integration."""
+    """Plain-text trader welcome body used for logs and ESP integration."""
     size_k = int(payload.account_size / 1000)
     dashboard = payload.dashboard_url or payload.login_url
     rules = _rules_summary(payload.challenge_rules)
     rules_block = "\n".join(f"  - {line}" for line in rules) or "  - See firm challenge template"
+    support = payload.support_contact or "support@proppredict.com"
 
     if payload.magic_link:
         creds = f"Magic link: {payload.magic_link}"
     elif payload.temporary_password:
         creds = (
             f"Username: {payload.to_email}\n"
-            f"Temporary password: {payload.temporary_password}\n"
-            f"Login: {payload.login_url}"
+            f"Password: {payload.temporary_password}\n"
+            f"Login link: {payload.login_url}"
         )
     else:
-        creds = f"Login: {payload.login_url}"
+        creds = f"Login link: {payload.login_url}"
 
     return (
-        f"{payload.tenant_name} — Your evaluation account is ready\n\n"
+        f"Your {payload.tenant_name} Prediction Markets Account is Ready\n\n"
         f"Hi {payload.display_name},\n\n"
-        f"Model type: {_format_model(payload.model_type)}\n"
-        f"Account size: ${size_k}K (${int(payload.account_size):,})\n"
-        f"Provider: {_format_provider(payload.provider)}\n\n"
-        f"Challenge rules:\n{rules_block}\n\n"
-        f"Login credentials:\n{creds}\n\n"
-        f"Trader Dashboard:\n{dashboard}\n"
+        f"Your prediction markets evaluation account has been issued. "
+        f"Use the details below to sign in and start trading.\n\n"
+        f"Account details\n"
+        f"  Model type: {_format_model(payload.model_type)}\n"
+        f"  Account size: ${size_k}K (${int(payload.account_size):,})\n"
+        f"  Provider: {_format_provider(payload.provider)}\n\n"
+        f"Challenge rules\n{rules_block}\n\n"
+        f"Login credentials\n{creds}\n\n"
+        f"Trader Dashboard\n{dashboard}\n\n"
+        f"Support contact: {support}\n"
+    )
+
+
+def render_prop_firm_issuance_copy_text(payload: PropFirmIssuanceCopyEmail) -> str:
+    """Plain-text optional confirmation for the issuing admin."""
+    size_k = int(payload.account_size / 1000)
+    rules = _rules_summary(payload.challenge_rules)
+    rules_block = "\n".join(f"  - {line}" for line in rules) or "  - See firm challenge template"
+    support = payload.support_contact or "support@proppredict.com"
+    issued = f"\n  Issued by: {payload.issued_by_name}" if payload.issued_by_name else ""
+    account_id = f"\n  Account ID: {payload.account_id}" if payload.account_id else ""
+    dashboard = f"\n\nTrader Dashboard\n{payload.dashboard_url}" if payload.dashboard_url else ""
+
+    return (
+        f"Account issuance confirmation — {payload.tenant_name}\n\n"
+        f"A prediction markets evaluation account was issued. "
+        f"Login credentials were emailed to the trader.\n\n"
+        f"Issuance summary\n"
+        f"  Trader: {payload.trader_email}\n"
+        f"  Model type: {_format_model(payload.model_type)}\n"
+        f"  Account size: ${size_k}K (${int(payload.account_size):,})\n"
+        f"  Provider: {_format_provider(payload.provider)}"
+        f"{account_id}{issued}\n\n"
+        f"Challenge rules applied\n{rules_block}"
+        f"{dashboard}\n\n"
+        f"Support contact: {support}\n"
     )
 
 
@@ -125,8 +179,7 @@ async def send_account_credentials_email(payload: AccountCredentialsEmail) -> bo
         )
         return False
 
-    size_k = int(payload.account_size / 1000)
-    subject = f"Your {payload.tenant_name} {size_k}K evaluation account is ready"
+    subject = trader_credentials_subject(payload.tenant_name)
     body = render_credentials_email_text(payload)
 
     logger.info(
@@ -145,4 +198,35 @@ async def send_account_credentials_email(payload: AccountCredentialsEmail) -> bo
         logger.debug("Dev credentials email body for %s:\n%s", payload.to_email, body)
 
     # Hook point for ESP integration — never log raw passwords in production.
+    return True
+
+
+async def send_prop_firm_issuance_copy(payload: PropFirmIssuanceCopyEmail) -> bool:
+    """Optional confirmation copy for the prop firm admin who issued the account."""
+    settings = get_settings()
+    if not settings.provisioning_email_enabled:
+        logger.info(
+            "Provisioning email disabled — skipped firm copy to %s for trader %s",
+            payload.to_email,
+            payload.trader_email,
+        )
+        return False
+
+    size_k = int(payload.account_size / 1000)
+    subject = (
+        f"Account issued: {payload.trader_email} · "
+        f"${size_k}K {_format_model(payload.model_type)}"
+    )
+    body = render_prop_firm_issuance_copy_text(payload)
+
+    logger.info(
+        "Sending prop firm issuance copy to=%s subject=%r trader=%s provider=%s",
+        payload.to_email,
+        subject,
+        payload.trader_email,
+        payload.provider,
+    )
+    if settings.environment == "development":
+        logger.debug("Dev firm issuance copy for %s:\n%s", payload.to_email, body)
+
     return True

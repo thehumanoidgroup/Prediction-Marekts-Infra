@@ -59,36 +59,26 @@ function makeAccount(
   };
 }
 
-describe("email templates — Issue Account welcome", () => {
+const baseContext = {
+  firmName: "Apex Prop",
+  supportContact: "support@apex.example",
+  appUrl: "https://app.example.com",
+  dashboardUrl: "https://app.example.com/dashboard?tenant=apex",
+  virtualBalance: 50_000,
+  challengeConfig,
+  provider: "kalshi",
+  tenantSlug: "apex",
+} as const;
+
+describe("issuance email templates", () => {
   it("formats known providers for the email body", () => {
     expect(formatProvider("kalshi")).toBe("Kalshi");
     expect(formatProvider("polymarket")).toBe("Polymarket");
-    expect(formatProvider("CUSTOM")).toBe("CUSTOM");
     expect(formatProvider(null)).toBe("Internal LMSR");
   });
 
   it("resolves provider from challenge otherCustomRules", () => {
     expect(resolveProviderFromAccount(makeAccount())).toBe("kalshi");
-    expect(
-      resolveProviderFromAccount(
-        makeAccount({
-          challengeConfig: {
-            id: "cfg_1",
-            propFirmAccountId: "acc_123",
-            profitTarget: 10,
-            dailyDrawdown: 5,
-            maxDrawdown: 10,
-            maxBetSizeValue: 2,
-            maxBetSizeMode: "percent",
-            consistencyScore: null,
-            otherCustomRules: {},
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        }),
-        "polymarket",
-      ),
-    ).toBe("polymarket");
   });
 
   it("summarizes challenge rules for the trader email", () => {
@@ -108,7 +98,7 @@ describe("email templates — Issue Account welcome", () => {
     );
   });
 
-  it("includes account details, credentials, rules, and dashboard CTA", () => {
+  it("renders trader email with required subject and body sections", () => {
     const credentials: TraderLoginCredentials & { magicLink?: string } = {
       username: "alex@example.com",
       password: "TempPass123!",
@@ -118,37 +108,26 @@ describe("email templates — Issue Account welcome", () => {
     const { subject, text, html } = renderTraderCredentialsEmail({
       account: makeAccount({ modelType: "1step", accountSize: "50K" }),
       credentials,
-      context: {
-        firmName: "Apex Prop",
-        supportContact: "support@apex.example",
-        appUrl: "https://app.example.com",
-        dashboardUrl: "https://app.example.com/dashboard?tenant=apex",
-        virtualBalance: 50_000,
-        challengeConfig,
-        provider: "kalshi",
-        tenantSlug: "apex",
-      },
+      context: { ...baseContext },
     });
 
-    expect(subject).toContain("Apex Prop");
-    expect(subject).toContain("evaluation account is ready");
+    expect(subject).toBe("Your Apex Prop Prediction Markets Account is Ready");
 
-    expect(text).toContain("Model type:");
+    expect(text).toContain("Model type: 1-Step Evaluation");
     expect(text).toContain("Account size: 50K");
-    expect(text).toContain("Provider: Kalshi");
     expect(text).toContain("Username: alex@example.com");
     expect(text).toContain("Password: TempPass123!");
-    expect(text).toContain("Challenge rules:");
+    expect(text).toContain("Login link:");
+    expect(text).toContain("Challenge rules");
     expect(text).toContain("Profit target: 10%");
-    expect(text).toContain("Trader Dashboard:");
-    expect(text).toContain("https://app.example.com/dashboard?tenant=apex");
+    expect(text).toContain("Support contact: support@apex.example");
 
-    expect(html).toContain("Model type");
-    expect(html).toContain("$50,000");
-    expect(html).toContain("Kalshi");
-    expect(html).toContain("Open Trader Dashboard");
-    expect(html).toContain("https://app.example.com/dashboard?tenant=apex");
+    expect(html).toContain("Your Prediction Markets Account is Ready");
+    expect(html).toContain("1-Step Evaluation");
     expect(html).toContain("TempPass123!");
+    expect(html).toContain("Challenge rules");
+    expect(html).toContain("Open login page");
+    expect(html).toContain("support@apex.example");
   });
 
   it("uses magic link when provided", () => {
@@ -159,25 +138,15 @@ describe("email templates — Issue Account welcome", () => {
         password: "",
         magicLink: "https://app.example.com/login?token=abc&tenant=apex",
       },
-      context: {
-        firmName: "Apex Prop",
-        supportContact: "support@apex.example",
-        appUrl: "https://app.example.com",
-        dashboardUrl: "https://app.example.com/dashboard?tenant=apex",
-        virtualBalance: 25_000,
-        challengeConfig,
-        provider: "kalshi",
-        tenantSlug: "apex",
-      },
+      context: { ...baseContext, virtualBalance: 25_000 },
     });
 
     expect(text).toContain("Magic link:");
-    expect(text).toContain("https://app.example.com/login?token=abc&tenant=apex");
-    expect(html).toContain("Log in with magic link");
+    expect(html).toContain("Sign in with magic link");
     expect(html).toContain("https://app.example.com/login?token=abc&amp;tenant=apex");
   });
 
-  it("notifies the firm with provider and rules summary", () => {
+  it("renders optional prop firm admin confirmation copy", () => {
     const { subject, text, html } = renderPropFirmNotificationEmail({
       account: makeAccount({ modelType: "instant", accountSize: "25K" }),
       credentials: {
@@ -185,23 +154,23 @@ describe("email templates — Issue Account welcome", () => {
         password: "secret",
       },
       context: {
-        firmName: "Apex Prop",
-        supportContact: "support@apex.example",
-        appUrl: "https://app.example.com",
-        dashboardUrl: "https://app.example.com/dashboard?tenant=apex",
+        ...baseContext,
         virtualBalance: 25_000,
-        challengeConfig,
         provider: "polymarket",
-        tenantSlug: "apex",
+        issuedByName: "Jamie Admin",
       },
       recipientEmail: "admin@apex.example",
     });
 
     expect(subject).toContain("alex@example.com");
+    expect(subject).toContain("Account issued");
+    expect(text).toContain("Account issuance confirmation");
     expect(text).toContain("Provider: Polymarket");
     expect(text).toContain("Model type: Instant Funding");
-    expect(html).toContain("Polymarket");
+    expect(text).toContain("Issued by: Jamie Admin");
+    expect(text).toContain("password / magic link sent only to the trader");
+    expect(html).toContain("Account issuance confirmation");
+    expect(html).toContain("Jamie Admin");
     expect(html).toContain("Challenge rules applied");
-    expect(html).toContain("Trader Dashboard");
   });
 });

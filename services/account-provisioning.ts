@@ -409,6 +409,8 @@ export async function provisionNewAccount(
         },
         tenantSlug: firm.slug,
         provider,
+        // Optional confirmation copy for the admin who issued the account.
+        issuedByUserId: input.auditContext?.actorUserId ?? input.provisionedBy,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Email delivery failed";
