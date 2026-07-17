@@ -21,7 +21,7 @@ function navGroups(tenant: TenantConfig): NavGroup[] {
   const trader: NavItem[] = [
     { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
     { href: "/markets", label: "Markets", icon: "markets" },
-    { href: "/portfolio", label: "Portfolio", icon: "portfolio" },
+    { href: "/portfolio", label: "My Portfolio", icon: "portfolio" },
   ];
   if (tenant.features.journal) trader.push({ href: "/journal", label: "Journal", icon: "journal" });
   if (tenant.features.leaderboard)

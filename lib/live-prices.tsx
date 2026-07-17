@@ -446,6 +446,11 @@ export function useLivePrice(marketId: string, fallback: number): number {
   return context?.prices[marketId] ?? fallback;
 }
 
+/** Live YES price map from the shared WebSocket / simulator feed. */
+export function useLivePricesMap(): Record<string, number> {
+  return useContext(LivePricesContext)?.prices ?? {};
+}
+
 /** Underlying equity last price for an S&P 500 ticker (Alpaca IEX). */
 export function useLiveStockPrice(ticker: string | null | undefined): number | null {
   const context = useContext(LivePricesContext);

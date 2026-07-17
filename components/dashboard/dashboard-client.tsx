@@ -21,7 +21,7 @@ import { KalshiMarketsSection } from "@/components/dashboard/kalshi-markets-sect
 import { Sp500MarketsSection } from "@/components/dashboard/sp500-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
-import { LivePositionsTable } from "@/components/dashboard/live-positions";
+import { OpenPositionsPanel } from "@/components/dashboard/open-positions-panel";
 import { MoversList } from "@/components/dashboard/movers-list";
 import { PortfolioCard } from "@/components/dashboard/portfolio-card";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
@@ -182,23 +182,13 @@ export function DashboardClient({
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader
-              title="Open positions"
-              subtitle={`${positions.length} open · ${formatSignedUsd(summary.openPnl)} unrealized`}
-              action={
-                <Link
-                  href="/portfolio"
-                  className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
-                >
-                  View all
-                </Link>
-              }
-            />
-            <CardBody>
-              <LivePositionsTable positions={positions} />
-            </CardBody>
-          </Card>
+          <OpenPositionsPanel
+            positions={positions}
+            summary={summary}
+            title="Open positions"
+            showTotals
+            compactHeader
+          />
 
           <JournalCard entries={journalEntries} />
 
