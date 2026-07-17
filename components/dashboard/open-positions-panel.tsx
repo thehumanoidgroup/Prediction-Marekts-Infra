@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { notifyPortfolioRefresh } from "@/hooks/use-dashboard-data";
+import { notifyPortfolioPosition } from "@/hooks/use-dashboard-data";
 import type { EnrichedPosition } from "@/lib/services";
 import { useLivePrice, useLivePricesMap } from "@/lib/live-prices";
 import {
@@ -112,7 +112,15 @@ function ClosePositionButton({
         setError(body.detail ?? body.error ?? "Close failed");
         return;
       }
-      notifyPortfolioRefresh();
+      notifyPortfolioPosition({
+        type: "portfolio_update",
+        reason: body.position ? "position_updated" : "position_closed",
+        marketId: position.marketId,
+        position: (body.position ?? null) as EnrichedPosition | null,
+        summary: body.summary,
+        order: body.order,
+        positions: body.positions,
+      });
       router.refresh();
     } catch {
       setError("Network error");

@@ -95,6 +95,7 @@ async function localPortfolioPayload(request: NextRequest) {
       numberOfOpenPositions: positions.length,
     },
     events: positionsToEvents(positions),
+    traderId: `local-${tenant.slug}`,
   };
 }
 

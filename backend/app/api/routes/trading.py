@@ -12,7 +12,6 @@ from app.runtime.serializers import (
     serialize_journal,
 )
 from app.runtime.store import TraderSession, get_trading_store
-from app.ws.manager import manager
 from integrations.kalshi import KalshiError, get_kalshi_service
 from integrations.polymarket import PolymarketError
 
@@ -223,16 +222,54 @@ async def place_order(
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from exc
 
-    await manager.broadcast(
-        tenant.slug,
-        {
-            "type": "portfolio_update",
-            "reason": "order_filled",
-            "market_id": body.market_id,
-            "ts": result["order"]["filledAt"],
-        },
+    from realtime.portfolio_events import broadcast_new_position, broadcast_portfolio_update
+    from services.portfolio_service import get_portfolio_service
+
+    portfolio = get_portfolio_service()
+    live_positions = await portfolio.get_live_positions(
+        session.user_id,
+        tenant_slug=tenant.slug,
+        session=session,
+        refresh=False,
     )
-    return result
+    summary = await portfolio.get_portfolio_summary(
+        session.user_id,
+        tenant_slug=tenant.slug,
+        session=session,
+        refresh=False,
+        positions=live_positions,
+    )
+    enriched = next(
+        (
+            pos
+            for pos in live_positions
+            if pos.get("marketId") == body.market_id and pos.get("outcome") == body.outcome
+        ),
+        result.get("position"),
+    )
+
+    if body.side == "buy" and enriched is not None:
+        await broadcast_new_position(
+            tenant.slug,
+            user_id=session.user_id,
+            position=enriched,
+            order=result.get("order"),
+            summary=summary,
+            reason="order_filled",
+        )
+    else:
+        await broadcast_portfolio_update(
+            tenant.slug,
+            user_id=session.user_id,
+            reason="position_closed" if enriched is None else "position_updated",
+            position=enriched,
+            order=result.get("order"),
+            summary=summary,
+            market_id=body.market_id,
+            positions=live_positions,
+        )
+
+    return {**result, "position": enriched, "summary": summary, "positions": live_positions}
 
 
 @router.get("/journal")

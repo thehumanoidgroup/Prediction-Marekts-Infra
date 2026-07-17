@@ -319,6 +319,63 @@ class PortfolioService:
             "traderId": str(trader_id),
         }
 
+    async def broadcast_marks_for_market(
+        self,
+        market_id: str,
+        *,
+        yes_price: float | None = None,
+        min_interval_seconds: float = 1.5,
+    ) -> int:
+        """Push mark-to-market P&L frames for every trader holding ``market_id``."""
+        from realtime.portfolio_events import broadcast_position_marks
+
+        if not hasattr(self, "_mark_push_at"):
+            self._mark_push_at: dict[tuple[str, str, str], float] = {}
+
+        pushed = 0
+        now = time.monotonic()
+        for session in self._store.iter_sessions():
+            held = [p for p in session.bankroll.positions() if p.market_id == market_id]
+            if not held:
+                continue
+
+            key = (session.tenant_slug, session.user_id, market_id)
+            last = self._mark_push_at.get(key, 0.0)
+            if now - last < min_interval_seconds:
+                continue
+            self._mark_push_at[key] = now
+
+            if yes_price is not None:
+                yes = float(yes_price)
+                self._store.apply_price_tick(market_id, yes)
+                meta = dict(session.external_markets.get(market_id) or {})
+                meta["yesPrice"] = yes
+                meta["id"] = market_id
+                session.external_markets[market_id] = meta
+
+            positions = await self.get_live_positions(
+                session.user_id,
+                tenant_slug=session.tenant_slug,
+                session=session,
+                refresh=False,
+            )
+            marked = [p for p in positions if p.get("marketId") == market_id]
+            summary = await self.get_portfolio_summary(
+                session.user_id,
+                tenant_slug=session.tenant_slug,
+                session=session,
+                refresh=False,
+                positions=positions,
+            )
+            await broadcast_position_marks(
+                session.tenant_slug,
+                user_id=session.user_id,
+                positions=marked or positions,
+                summary=summary,
+            )
+            pushed += 1
+        return pushed
+
 
 _portfolio_service: PortfolioService | None = None
 

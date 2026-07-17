@@ -1,9 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHybridMarket } from "@/lib/hybrid-markets";
 import { previewOrderRisk } from "@/lib/provisioning/order-preview";
-import { placeOrder } from "@/services";
+import { getPortfolioSummary, getPositions, placeOrder } from "@/services";
 import type { Outcome } from "@/types";
-import { getTenantFromRequest } from "@/lib/tenant-request";
+import { getTenantFromRequest, getTenantSlugFromRequest } from "@/lib/tenant-request";
+
+async function bridgePortfolioEvent(
+  request: NextRequest,
+  payload: Record<string, unknown>,
+) {
+  const backend = process.env.PP_API_URL ?? process.env.API_URL;
+  if (!backend) return;
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Tenant-Slug": getTenantSlugFromRequest(request),
+      Accept: "application/json",
+    };
+    const auth = request.headers.get("authorization");
+    if (auth) headers.Authorization = auth;
+    await fetch(`${backend.replace(/\/$/, "")}/api/trader/portfolio/events`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+  } catch {
+    // Local portfolio event still fires from the client.
+  }
+}
 
 export async function POST(request: NextRequest) {
   const tenant = getTenantFromRequest(request);
@@ -61,7 +86,37 @@ export async function POST(request: NextRequest) {
       market,
       yesPrice: typeof yesPrice === "number" ? yesPrice : undefined,
     });
-    return NextResponse.json(result, { status: 201 });
+
+    const positions = getPositions(tenant.id);
+    const summary = getPortfolioSummary(tenant.id);
+    const enriched =
+      positions.find((p) => p.marketId === marketId && p.outcome === outcome) ?? null;
+
+    const payload = {
+      ...result,
+      position: enriched,
+      positions,
+      summary: {
+        ...summary,
+        totalValue: summary.equity,
+        positionsValue: positions.reduce((sum, p) => sum + p.value, 0),
+        openPositions: positions.length,
+        numberOfOpenPositions: positions.length,
+      },
+    };
+
+    void bridgePortfolioEvent(request, {
+      eventType: side === "buy" && enriched ? "new_position" : "portfolio_update",
+      reason:
+        side === "buy" ? "order_filled" : enriched ? "position_updated" : "position_closed",
+      position: enriched ?? undefined,
+      order: result.order,
+      summary: payload.summary,
+      marketId,
+      positions,
+    });
+
+    return NextResponse.json(payload, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Order failed";
     return NextResponse.json({ error: message }, { status: 422 });
