@@ -105,6 +105,9 @@ export async function saveOrUpdateTemplate(
 ): Promise<ChallengeTemplateView> {
   const prismaModel = fromApiModelType(modelType);
   const defaults = getDefaultTemplateFields(modelType);
+  if (!(data.maxDrawdown > data.dailyDrawdown)) {
+    throw new Error("Max drawdown must be greater than daily drawdown");
+  }
   const payload = {
     profitTarget: data.profitTarget,
     dailyDrawdown: data.dailyDrawdown,

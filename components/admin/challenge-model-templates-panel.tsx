@@ -8,6 +8,7 @@ import {
   CHALLENGE_TEMPLATE_DEFAULTS,
   type ChallengeTemplateView,
 } from "@/lib/provisioning/challenge-template-defaults";
+import { validateDrawdownOrder } from "@/lib/schemas/challenge-template";
 import { cn } from "@/lib/utils";
 import type { MaxBetSizeMode, PropFirmModelType } from "@/types/provisioning";
 
@@ -185,6 +186,12 @@ function ModelTemplateCard({
       setPending(null);
       return;
     }
+    const drawdownError = validateDrawdownOrder(dailyDrawdown, maxDrawdown);
+    if (drawdownError) {
+      setMessage({ ok: false, text: drawdownError });
+      setPending(null);
+      return;
+    }
     if (
       consistencyScore !== null &&
       (!Number.isFinite(consistencyScore) || consistencyScore < 0 || consistencyScore > 1)
@@ -305,7 +312,7 @@ function ModelTemplateCard({
               className={cn(inputClass, "pr-8")}
             />
           </Field>
-          <Field label="Daily drawdown" suffix="%">
+          <Field label="Daily drawdown" suffix="%" hint="Must be less than max">
             <input
               type="number"
               min={0.1}
@@ -316,7 +323,7 @@ function ModelTemplateCard({
               className={cn(inputClass, "pr-8")}
             />
           </Field>
-          <Field label="Max drawdown" suffix="%">
+          <Field label="Max drawdown" suffix="%" hint="Must exceed daily">
             <input
               type="number"
               min={0.1}

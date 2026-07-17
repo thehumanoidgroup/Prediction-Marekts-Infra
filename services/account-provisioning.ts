@@ -114,7 +114,10 @@ export interface ProvisionNewAccountResult {
 }
 
 /**
- * Resolve challenge rules from model type, account size, firm program, and overrides.
+ * Resolve challenge rules from model type, account size, firm program, templates, and overrides.
+ *
+ * Prefer {@link resolveChallengeConfigForAccountAsync} when a DB is available so
+ * saved ``PropFirmChallengeTemplate`` rows are applied automatically.
  */
 export function resolveChallengeConfigForAccount(input: {
   propFirmId: string;
@@ -124,6 +127,7 @@ export function resolveChallengeConfigForAccount(input: {
   challengeConfigOverrides?: Partial<ChallengeConfigInput>;
   firmProgram?: Partial<import("@/lib/tenants").TenantProgram>;
   firmSettings?: import("@/types/firm-settings").PropFirmSettingsRecord;
+  firmChallengeTemplate?: import("@/lib/provisioning/default-rules").DefaultRulesContext["firmChallengeTemplate"];
 }): ChallengeConfigInput {
   const filteredCustomRules = input.firmSettings
     ? filterAllowedPurchaseOverrides(input.firmSettings, input.customRules)
@@ -137,9 +141,53 @@ export function resolveChallengeConfigForAccount(input: {
       ? getModelDefaultsForType(input.firmSettings, input.modelType)
       : undefined,
     firmDefaultCustomRules: input.firmSettings?.defaultCustomRules,
+    firmChallengeTemplate: input.firmChallengeTemplate,
     customRules: filteredCustomRules,
   });
   return mergeChallengeConfig(base, input.challengeConfigOverrides);
+}
+
+/**
+ * Async resolver that loads the firm's PropFirmChallengeTemplate when available.
+ * Used by webhook and manual provisioning so both paths share the same fallback.
+ */
+export async function resolveChallengeConfigForAccountAsync(input: {
+  propFirmId: string;
+  modelType: PropFirmModelType;
+  accountSize: AccountSize;
+  customRules?: Record<string, unknown>;
+  challengeConfigOverrides?: Partial<ChallengeConfigInput>;
+  firmProgram?: Partial<import("@/lib/tenants").TenantProgram>;
+  firmSettings?: import("@/types/firm-settings").PropFirmSettingsRecord;
+}): Promise<ChallengeConfigInput> {
+  const { getTemplateForModel } = await import(
+    "@/lib/provisioning/challenge-template-service"
+  );
+  const firmTemplate = await getTemplateForModel(input.propFirmId, input.modelType);
+  const existingTemplateId = input.challengeConfigOverrides?.templateId;
+
+  return resolveChallengeConfigForAccount({
+    ...input,
+    firmChallengeTemplate: {
+      profitTarget: firmTemplate.profitTarget,
+      dailyDrawdown: firmTemplate.dailyDrawdown,
+      maxDrawdown: firmTemplate.maxDrawdown,
+      maxBetSizePerPick: firmTemplate.maxBetSizePerPick,
+      maxBetSizeMode: firmTemplate.maxBetSizeMode,
+      consistencyScore: firmTemplate.consistencyScore,
+      minTradingDays: firmTemplate.minTradingDays,
+      otherRules: firmTemplate.otherRules,
+    },
+    challengeConfigOverrides: {
+      ...input.challengeConfigOverrides,
+      templateId:
+        existingTemplateId !== undefined
+          ? existingTemplateId
+          : firmTemplate.isDefault
+            ? null
+            : firmTemplate.id,
+    },
+  });
 }
 
 /** Hydrate in-memory risk profiles after cold start (idempotent). */
@@ -244,7 +292,7 @@ export async function provisionNewAccount(
 
     validateProvisioningAgainstSettings(firmSettings, data.modelType, data.accountSize);
 
-    const challengeConfig = resolveChallengeConfigForAccount({
+    const challengeConfig = await resolveChallengeConfigForAccountAsync({
       propFirmId: data.propFirmId,
       modelType: data.modelType,
       accountSize: data.accountSize,

@@ -41,9 +41,10 @@ export default async function AdminChallengeModelTemplatesPage() {
         <h1 className="text-base font-semibold text-foreground">
           Challenge Rules by Model Type
         </h1>
-        <p className="mt-1 text-sm text-muted">
-          Templates applied when issuing 1-step, 2-step, 3-step, and instant accounts.
-          Per-account overrides from webhooks or manual issuance still win.
+        <p className="mt-1 max-w-3xl text-sm text-muted">
+          Save one rule set per evaluation model. Webhook purchases and Issue New Account
+          both load these templates automatically. Traders only see the rules baked into
+          their issued account — edits here do not change accounts already sold.
         </p>
       </div>
 
@@ -53,19 +54,38 @@ export default async function AdminChallengeModelTemplatesPage() {
         </div>
 
         <Card className="self-start">
-          <CardHeader title="How this works" subtitle="Issuance resolution order" />
+          <CardHeader title="How templates work" subtitle="Support & issuance guide" />
           <CardBody>
             <ol className="list-decimal space-y-2.5 pl-4 text-sm text-muted">
               <li>Platform preset for the selected model type</li>
               <li>
-                Firm template saved here for that model (profit target, drawdowns, bet
-                size, consistency)
+                Firm template saved here (profit target, drawdowns, bet size, consistency,
+                min days)
               </li>
               <li>
-                Per-account overrides from the purchase webhook or manual issuance form
+                Per-account overrides from the purchase webhook or Issue New Account form
               </li>
             </ol>
             <div className="mt-5 space-y-3 border-t border-edge/60 pt-4 text-sm">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+                  Where they apply
+                </p>
+                <p className="mt-1 text-muted">
+                  Checkout webhooks, Prop Firm Admin issuance, and Super Admin manual
+                  provisioning all resolve through the same template fallback — including
+                  Kalshi, Polymarket, S&amp;P 500 Dynamic, and internal markets.
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+                  Drawdown validation
+                </p>
+                <p className="mt-1 text-muted">
+                  Max drawdown must be greater than daily drawdown. The risk engine uses
+                  both limits when enforcing evaluation accounts.
+                </p>
+              </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-faint">
                   Max bet modes

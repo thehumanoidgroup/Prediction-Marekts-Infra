@@ -275,8 +275,23 @@ class ChallengeTemplateService:
             )
         )
         template = existing.scalar_one_or_none()
+        defaults = default_template_fields(mt)
+        effective_daily = float(
+            payload.get(
+                "daily_drawdown",
+                template.daily_drawdown if template is not None else defaults["daily_drawdown"],
+            )
+        )
+        effective_max = float(
+            payload.get(
+                "max_drawdown",
+                template.max_drawdown if template is not None else defaults["max_drawdown"],
+            )
+        )
+        if not (effective_max > effective_daily):
+            raise ValueError("Max drawdown must be greater than daily drawdown")
+
         if template is None:
-            defaults = default_template_fields(mt)
             template = PropFirmChallengeTemplate(
                 prop_firm_id=prop_firm_id,
                 model_type=mt,

@@ -145,3 +145,8 @@ export function listRiskProfiles(propFirmId?: string): RiskProfile[] {
   const profiles = [...getState().profiles.values()];
   return propFirmId ? profiles.filter((p) => p.propFirmId === propFirmId) : profiles;
 }
+
+/** Test helper — wipe in-memory profiles between cases. */
+export function clearRiskProfilesForTests(): void {
+  getState().profiles.clear();
+}

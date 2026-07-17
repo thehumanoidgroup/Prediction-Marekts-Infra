@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 ProviderName = Literal["internal", "polymarket", "kalshi", "sp500_dynamic"]
 ModelType = Literal["1step", "2step", "3step", "instant", "evaluation"]
@@ -105,6 +105,14 @@ class PropFirmChallengeTemplateSave(BaseModel):
     drawdown_mode: Literal["static", "trailing", "absolute"] | None = None
     profit_split_pct: float | None = Field(None, ge=1, le=100)
     challenge_duration_days: int | None = Field(None, ge=1, le=730)
+
+    @model_validator(mode="after")
+    def max_drawdown_exceeds_daily(self) -> "PropFirmChallengeTemplateSave":
+        daily = self.daily_drawdown if self.daily_drawdown is not None else self.max_daily_loss_pct
+        maximum = self.max_drawdown if self.max_drawdown is not None else self.max_drawdown_pct
+        if daily is not None and maximum is not None and not (maximum > daily):
+            raise ValueError("Max drawdown must be greater than daily drawdown")
+        return self
 
 
 class ProvisionAccountRequest(BaseModel):
