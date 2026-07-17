@@ -58,7 +58,8 @@ export function useDashboardData(initial?: Partial<DashboardData>) {
           account: ChallengeAccount;
           summary: PortfolioSummary;
           positions: EnrichedPosition[];
-        }>("/api/portfolio"),
+          events?: unknown[];
+        }>("/api/trader/portfolio"),
         apiFetch<{ journal: JournalEntry[] }>("/api/journal"),
         apiFetch<{ markets: Market[] }>("/api/markets?sort=movers"),
       ]);
