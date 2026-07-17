@@ -12,6 +12,7 @@ import {
   listFirmOverviews as storeFirmOverviews,
   listGlobalTemplates,
   patchTenantOverrides,
+  recomputeTenantEquity,
   type CreateMarketInput,
   type TenantOverrides,
 } from "@/lib/store";
@@ -108,7 +109,7 @@ export function getPositions(tenantId: string): EnrichedPosition[] {
       traders: 0,
       closesAt: Date.now(),
       history: [],
-      source: "internal" as const,
+      source: inferMarketSource(pos.marketId),
     };
     const currentPrice = pos.outcome === "yes" ? market.yesPrice : 1 - market.yesPrice;
     const value = currentPrice * pos.shares;
@@ -117,6 +118,18 @@ export function getPositions(tenantId: string): EnrichedPosition[] {
     const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
     return { ...pos, market, currentPrice, value, cost, pnl, pnlPct };
   });
+}
+
+/** Infer provider from market id prefix when the catalog entry is missing. */
+export function inferMarketSource(
+  marketId: string,
+): "internal" | "polymarket" | "kalshi" | "sp500_dynamic" | "external" {
+  const id = marketId.toLowerCase();
+  if (id.startsWith("kalshi-")) return "kalshi";
+  if (id.startsWith("poly-") || id.startsWith("0x")) return "polymarket";
+  if (id.startsWith("sp500-")) return "sp500_dynamic";
+  if (id.startsWith("mkt-")) return "internal";
+  return "external";
 }
 
 export function getJournal(tenantId: string): JournalEntry[] {
@@ -128,9 +141,12 @@ export function getTenantLeaderboard(tenantId: string): LeaderboardEntry[] {
 }
 
 export function getPortfolioSummary(tenantId: string): PortfolioSummary {
+  // Keep equity / totalPnl aligned with live open marks before summarizing.
+  recomputeTenantEquity(tenantId);
   const { account, journal } = getTenantState(tenantId);
   const positions = getPositions(tenantId);
   const openPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+  const equity = account.balance + openPnl;
 
   const closed = journal.filter((j) => j.pnl !== null);
   const wins = closed.filter((j) => (j.pnl ?? 0) > 0);
@@ -144,10 +160,10 @@ export function getPortfolioSummary(tenantId: string): PortfolioSummary {
 
   return {
     balance: account.balance,
-    equity: account.equity,
+    equity,
     openPnl,
     dailyPnl: account.dailyPnl,
-    totalPnl: account.totalPnl,
+    totalPnl: equity - account.startingBalance,
     winRate: closed.length ? (wins.length / closed.length) * 100 : 0,
     totalTrades: closed.length,
     avgWin: wins.length ? grossWin / wins.length : 0,
@@ -258,9 +274,12 @@ export function placeOrder(tenantId: string, input: PlaceOrderInput): PlaceOrder
     price,
     pnl: null,
     note: "",
-    tags: [],
+    tags: market.source && market.source !== "internal" ? [market.source] : [],
     executedAt: order.filledAt,
   });
+
+  // Keep challenge equity / objectives aligned with portfolio mark-to-market.
+  recomputeTenantEquity(tenantId);
 
   return { order, position: position! };
 }

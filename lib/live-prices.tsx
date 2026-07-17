@@ -11,6 +11,13 @@ import {
   type ReactNode,
 } from "react";
 import type { LiveEvent, LiveEventStatus } from "@/lib/types";
+import {
+  notifyPortfolioWs,
+  notifyPositionMark,
+  notifyTraderUserId,
+  TRADER_USER_ID_EVENT,
+  type PortfolioWsPayload,
+} from "@/lib/portfolio-realtime";
 
 /**
  * Live market prices and events for the whole app.
@@ -83,6 +90,33 @@ function applyLiveMessage(
     return;
   }
 
+  if (message.type === "new_position" || message.type === "portfolio_update") {
+    const data = (message.data ?? {}) as Record<string, unknown>;
+    const payload: PortfolioWsPayload = {
+      type: message.type,
+      reason: message.reason as PortfolioWsPayload["reason"],
+      userId: typeof message.user_id === "string" ? message.user_id : undefined,
+      marketId: typeof message.market_id === "string" ? message.market_id : undefined,
+      position: (data.position as PortfolioWsPayload["position"]) ?? null,
+      positions: data.positions as PortfolioWsPayload["positions"],
+      summary: data.summary as PortfolioWsPayload["summary"],
+      order: data.order as Record<string, unknown> | undefined,
+      ts: typeof message.ts === "number" ? message.ts : undefined,
+    };
+    notifyPortfolioWs(payload);
+    if (payload.userId) notifyTraderUserId(payload.userId);
+    const yesFromPosition =
+      payload.position?.market?.yesPrice ??
+      (payload.positions?.[0]?.market?.yesPrice as number | undefined);
+    const marketId = payload.position?.marketId ?? payload.marketId;
+    if (marketId && typeof yesFromPosition === "number") {
+      const yes = clamp(yesFromPosition);
+      clearOptimistic(marketId);
+      setPrices((current) => ({ ...current, [marketId]: yes }));
+    }
+    return;
+  }
+
   if (message.type === "stock_quote" && message.data) {
     const data = message.data as Record<string, unknown>;
     const ticker = String(data.stock_ticker ?? "").toUpperCase();
@@ -102,6 +136,7 @@ function applyLiveMessage(
       marketId in current ? { ...current, [marketId]: yes } : current,
     );
     setEvents((current) => applyPriceToEvents(current, marketId, yes));
+    notifyPositionMark({ marketId, yesPrice: yes });
     return;
   }
 
@@ -126,6 +161,10 @@ function applyLiveMessage(
           : item,
       ),
     );
+    notifyPositionMark({ marketId: key, yesPrice: yes });
+    if (message.event_id && String(message.event_id) !== key) {
+      notifyPositionMark({ marketId: String(message.event_id), yesPrice: yes });
+    }
     return;
   }
 
@@ -382,12 +421,27 @@ export function LivePricesProvider({
     if (!wsBase) return;
     const url = `${wsBase.replace(/\/$/, "")}/ws/markets/${encodeURIComponent(tenantSlug)}`;
     let socket: WebSocket | null = null;
+    let traderUserId: string | null = null;
+
+    const subscribeUserRoom = () => {
+      if (!socket || socket.readyState !== WebSocket.OPEN || !traderUserId) return;
+      socket.send(
+        JSON.stringify({
+          type: "subscribe",
+          rooms: ["all", `user:${traderUserId}`],
+        }),
+      );
+    };
+
     try {
       socket = new WebSocket(url);
     } catch {
       return;
     }
-    socket.onopen = () => setStatus("live");
+    socket.onopen = () => {
+      setStatus("live");
+      subscribeUserRoom();
+    };
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as Record<string, unknown>;
@@ -396,7 +450,17 @@ export function LivePricesProvider({
         // ignore malformed frames
       }
     };
+
+    const onTraderId = (event: Event) => {
+      const id = (event as CustomEvent<{ traderId?: string }>).detail?.traderId;
+      if (!id) return;
+      traderUserId = id;
+      subscribeUserRoom();
+    };
+    window.addEventListener(TRADER_USER_ID_EVENT, onTraderId);
+
     return () => {
+      window.removeEventListener(TRADER_USER_ID_EVENT, onTraderId);
       socket?.close();
     };
   }, [queueMessage, tenantSlug]);
@@ -444,6 +508,11 @@ export function useFeedStatus(): FeedStatus {
 export function useLivePrice(marketId: string, fallback: number): number {
   const context = useContext(LivePricesContext);
   return context?.prices[marketId] ?? fallback;
+}
+
+/** Live YES price map from the shared WebSocket / simulator feed. */
+export function useLivePricesMap(): Record<string, number> {
+  return useContext(LivePricesContext)?.prices ?? {};
 }
 
 /** Underlying equity last price for an S&P 500 ticker (Alpaca IEX). */

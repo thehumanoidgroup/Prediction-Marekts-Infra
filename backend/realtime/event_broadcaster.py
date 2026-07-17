@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 EventMessageType = Literal["price_update", "status_change", "new_event", "stock_quote"]
 
 
+def user_room(user_id: str) -> str:
+    """Room key for trader-private portfolio frames."""
+    return f"user:{user_id}"
+
+
 def category_room(category: str) -> str:
     """Room key for category-scoped subscriptions."""
     return f"category:{category}"

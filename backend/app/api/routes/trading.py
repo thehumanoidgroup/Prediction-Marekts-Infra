@@ -9,14 +9,9 @@ from app.api.deps import get_current_tenant, get_trader_session
 from app.models import Tenant
 from app.runtime.hybrid_markets import get_hybrid_market, list_hybrid_markets
 from app.runtime.serializers import (
-    serialize_account,
     serialize_journal,
-    serialize_market,
-    serialize_portfolio_summary,
-    serialize_position,
 )
 from app.runtime.store import TraderSession, get_trading_store
-from app.ws.manager import manager
 from integrations.kalshi import KalshiError, get_kalshi_service
 from integrations.polymarket import PolymarketError
 
@@ -66,25 +61,6 @@ def _sp500_ticker_allowed(session: TraderSession, market_id: str) -> bool:
     ticker = parts[1].upper()
     return ticker in {t.upper() for t in session.sp500_tickers}
 
-
-async def _refresh_session_external_prices(session: TraderSession) -> None:
-    """Refresh cached external quotes for open positions and Kalshi allowlist."""
-    market_ids: set[str] = {pos.market_id for pos in session.bankroll.positions()}
-    for ticker in session.kalshi_market_tickers:
-        market_ids.add(f"kalshi-{ticker.upper()}")
-
-    service = get_kalshi_service()
-    for market_id in market_ids:
-        if not market_id.lower().startswith("kalshi-"):
-            continue
-        try:
-            market = await service.get_market_by_id(market_id, refresh=True)
-        except KalshiError:
-            continue
-        if market is not None:
-            session.external_markets[market_id] = market
-
-
 @router.get("/markets")
 async def list_markets(
     session: Annotated[TraderSession, Depends(get_trader_session)],
@@ -124,14 +100,18 @@ async def get_portfolio(
     session: Annotated[TraderSession, Depends(get_trader_session)],
     tenant: Annotated[Tenant, Depends(get_current_tenant)],
 ) -> dict:
-    store = get_trading_store()
-    if session.provider in {"kalshi", "sp500_dynamic"} or session.external_markets:
-        await _refresh_session_external_prices(session)
-    store.sync_session_risk(session)
+    """Legacy trading portfolio — delegates to PortfolioService for live marks."""
+    from services.portfolio_service import get_portfolio_service
+
+    payload = await get_portfolio_service().get_trader_portfolio(
+        session.user_id,
+        tenant_slug=tenant.slug,
+        session=session,
+    )
     return {
-        "account": serialize_account(session, store),
-        "positions": serialize_position(session, store),
-        "summary": serialize_portfolio_summary(session, store),
+        "account": payload["account"],
+        "positions": payload["positions"],
+        "summary": payload["summary"],
     }
 
 
@@ -201,6 +181,21 @@ async def place_order(
                 yes_price=float(market.get("yesPrice") or 0.5),
                 category=str(market.get("category") or "economics"),
             )
+        elif market_id.lower().startswith("poly-") or market_id.lower().startswith("0x"):
+            market = await get_hybrid_market(market_id)
+            if market is None:
+                raise HTTPException(404, detail="Polymarket market not found")
+
+            result = store.place_external_order(
+                session,
+                market_id=market_id,
+                market_question=str(market.get("question") or market_id),
+                outcome=body.outcome,
+                side=body.side,
+                shares=body.shares,
+                yes_price=float(market.get("yesPrice") or 0.5),
+                category=str(market.get("category") or "politics"),
+            )
         elif market_id.lower().startswith("sp500-"):
             if session.sp500_tickers and not _sp500_ticker_allowed(session, market_id):
                 raise HTTPException(403, detail="S&P 500 ticker not in your allowlist")
@@ -242,16 +237,54 @@ async def place_order(
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from exc
 
-    await manager.broadcast(
-        tenant.slug,
-        {
-            "type": "portfolio_update",
-            "reason": "order_filled",
-            "market_id": body.market_id,
-            "ts": result["order"]["filledAt"],
-        },
+    from realtime.portfolio_events import broadcast_new_position, broadcast_portfolio_update
+    from services.portfolio_service import get_portfolio_service
+
+    portfolio = get_portfolio_service()
+    live_positions = await portfolio.get_live_positions(
+        session.user_id,
+        tenant_slug=tenant.slug,
+        session=session,
+        refresh=False,
     )
-    return result
+    summary = await portfolio.get_portfolio_summary(
+        session.user_id,
+        tenant_slug=tenant.slug,
+        session=session,
+        refresh=False,
+        positions=live_positions,
+    )
+    enriched = next(
+        (
+            pos
+            for pos in live_positions
+            if pos.get("marketId") == body.market_id and pos.get("outcome") == body.outcome
+        ),
+        result.get("position"),
+    )
+
+    if body.side == "buy" and enriched is not None:
+        await broadcast_new_position(
+            tenant.slug,
+            user_id=session.user_id,
+            position=enriched,
+            order=result.get("order"),
+            summary=summary,
+            reason="order_filled",
+        )
+    else:
+        await broadcast_portfolio_update(
+            tenant.slug,
+            user_id=session.user_id,
+            reason="position_closed" if enriched is None else "position_updated",
+            position=enriched,
+            order=result.get("order"),
+            summary=summary,
+            market_id=body.market_id,
+            positions=live_positions,
+        )
+
+    return {**result, "position": enriched, "summary": summary, "positions": live_positions}
 
 
 @router.get("/journal")

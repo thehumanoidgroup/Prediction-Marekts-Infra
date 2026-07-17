@@ -34,7 +34,7 @@ export function PortfolioCard({
   return (
     <Card>
       <CardHeader
-        title="Portfolio"
+        title="My Portfolio"
         action={
           <div className="flex items-center gap-2">
             <ProviderBadge provider={account?.provider} compact />
@@ -42,7 +42,7 @@ export function PortfolioCard({
               href="/portfolio"
               className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
             >
-              Details
+              Open positions
             </Link>
           </div>
         }

@@ -144,7 +144,7 @@ function generateMarkets(now: number): Market[] {
   });
 }
 
-function buildObjectives(account: {
+export function buildObjectives(account: {
   totalPnl: number;
   startingBalance: number;
   dailyPnl: number;
@@ -196,6 +196,53 @@ function buildObjectives(account: {
       met: account.daysTraded >= account.minTradingDays,
     },
   ];
+}
+
+/**
+ * Recompute equity / totalPnl / dailyPnl / challenge objectives from cash + open marks.
+ * Call after every fill so Portfolio and risk panels stay aligned.
+ */
+export function recomputeTenantEquity(tenantId: string): void {
+  const state = getTenantState(tenantId);
+  const account = state.account;
+
+  let openPnl = 0;
+  for (const pos of state.positions) {
+    const market = getRegisteredMarket(pos.marketId);
+    const yes = market?.yesPrice ?? pos.avgPrice;
+    const current = pos.outcome === "yes" ? yes : 1 - yes;
+    openPnl += (current - pos.avgPrice) * pos.shares;
+  }
+
+  const equity = account.balance + openPnl;
+  const totalPnl = equity - account.startingBalance;
+  const prevClose =
+    account.equityCurve.length >= 2
+      ? account.equityCurve[account.equityCurve.length - 2]!.p
+      : account.startingBalance;
+  const dailyPnl = equity - prevClose;
+
+  const highWater = Math.max(account.highWaterMark ?? account.startingBalance, equity);
+  const maxDrawdownUsd = Math.max(0, highWater - equity);
+  const priorDrawdown =
+    account.objectives.find((o) => o.id === "max-drawdown")?.current ?? 0;
+  const trackedDrawdown = Math.max(priorDrawdown, maxDrawdownUsd);
+
+  account.equity = Math.round(equity * 100) / 100;
+  account.totalPnl = Math.round(totalPnl * 100) / 100;
+  account.dailyPnl = Math.round(dailyPnl * 100) / 100;
+  account.highWaterMark = highWater;
+  account.objectives = buildObjectives({
+    totalPnl: account.totalPnl,
+    startingBalance: account.startingBalance,
+    dailyPnl: account.dailyPnl,
+    daysTraded: account.daysTraded,
+    minTradingDays: account.minTradingDays,
+    profitTargetPct: account.profitTargetPct,
+    maxDailyLossPct: account.maxDailyLossPct,
+    maxDrawdownPct: account.maxDrawdownPct,
+    maxDrawdownUsd: trackedDrawdown,
+  });
 }
 
 function generateTenantState(tenantId: string, markets: Market[], now: number): TenantState {
@@ -736,5 +783,3 @@ export function recordPlatformActivity(item: PlatformActivity): void {
     store.platformActivity.length = 200;
   }
 }
-
-export { buildObjectives };

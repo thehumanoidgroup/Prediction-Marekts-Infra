@@ -581,6 +581,22 @@ class LiveEventService:
             previous_probabilities=before if before != event.probabilities else None,
             volume_delta=volume_delta if volume_delta > 0 else max(0.0, event.volume - before_volume),
         )
+        # Push live P&L marks to traders holding this market.
+        try:
+            from services.portfolio_service import get_portfolio_service
+
+            yes = float((event.probabilities or {}).get("yes") or 0.5)
+            await get_portfolio_service().broadcast_marks_for_market(
+                str(event.external_id or event.id),
+                yes_price=yes,
+            )
+            if event.external_id and str(event.id) != str(event.external_id):
+                await get_portfolio_service().broadcast_marks_for_market(
+                    str(event.id),
+                    yes_price=yes,
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("Portfolio mark broadcast skipped", exc_info=True)
         return event
 
     async def broadcast_event_update(self, event_id: str, update_data: dict[str, Any]) -> None:

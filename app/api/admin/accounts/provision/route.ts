@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestTenant } from "@/lib/tenant-server";
 import { ensureSeeded } from "@/lib/seed";
+import { decodeAccessToken, getBearerToken } from "@/lib/auth";
 import { provisioningDbUnavailable } from "@/lib/provisioning/route-auth";
 import { provisioningErrorResponse } from "@/lib/provisioning/errors";
 import {
@@ -18,6 +19,14 @@ import { firmTemplateToChallengeRulesInput } from "@/lib/provisioning/firm-templ
 import { defaultVirtualBalance } from "@/lib/provisioning/serialize";
 import { DEFAULT_SP500_TICKERS, getSp500ChallengeTemplate } from "@/lib/sp500/challenge-templates";
 import { provisionNewAccount } from "@/services/account-provisioning";
+
+/** Soft-resolve the issuing admin from the Bearer JWT when present. */
+async function resolveIssuingAdminId(request: NextRequest): Promise<string | undefined> {
+  const token = getBearerToken(request);
+  if (!token) return undefined;
+  const payload = await decodeAccessToken(token);
+  return payload?.sub;
+}
 
 /** Prop Firm Admin: manually provision an evaluation account (Prisma). */
 export async function POST(request: NextRequest) {
@@ -38,6 +47,7 @@ export async function POST(request: NextRequest) {
 
   const tenant = await getRequestTenant();
   await ensureSeeded();
+  const issuedByUserId = await resolveIssuingAdminId(request);
 
   const provider = normalizeProvider(payload.provider, "kalshi");
   const modelType = fromApiModelTypeLoose(
@@ -113,6 +123,8 @@ export async function POST(request: NextRequest) {
       sendEmails: payload.send_credentials_email !== false,
       source: "manual",
       activateImmediately: true,
+      provisionedBy: issuedByUserId,
+      auditContext: issuedByUserId ? { actorUserId: issuedByUserId } : undefined,
     });
 
     return NextResponse.json(

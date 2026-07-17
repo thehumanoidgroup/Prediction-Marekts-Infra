@@ -21,11 +21,13 @@ import { KalshiMarketsSection } from "@/components/dashboard/kalshi-markets-sect
 import { Sp500MarketsSection } from "@/components/dashboard/sp500-markets-section";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { JournalCard } from "@/components/dashboard/journal-card";
-import { LivePositionsTable } from "@/components/dashboard/live-positions";
+import { OpenPositionsPanel } from "@/components/dashboard/open-positions-panel";
+import { ChallengeRiskBanners } from "@/components/dashboard/challenge-risk-banners";
 import { MoversList } from "@/components/dashboard/movers-list";
 import { PortfolioCard } from "@/components/dashboard/portfolio-card";
 import { StatCards, type Stat } from "@/components/dashboard/stat-cards";
 import { FeedStatusDot } from "@/components/markets/live-price";
+import { buildChallengeWarnings } from "@/lib/challenge-warnings";
 import { cn } from "@/lib/utils";
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -70,6 +72,7 @@ export function DashboardClient({
     journal.status === "success" ? journal.data.slice(0, 4) : initial?.journal?.slice(0, 4) ?? [];
   const moverMarkets =
     movers.status === "success" ? movers.data : initial?.movers ?? [];
+  const challengeWarnings = buildChallengeWarnings(account, summary);
 
   const totalPnlPct = (account.totalPnl / account.startingBalance) * 100;
   const profitTargetUsd = account.startingBalance * (1 + account.profitTargetPct / 100);
@@ -131,6 +134,8 @@ export function DashboardClient({
         <ErrorBanner message={journal.error} onRetry={reload} />
       ) : null}
 
+      <ChallengeRiskBanners warnings={challengeWarnings} />
+
       <StatCards stats={stats} />
 
       <div className="grid gap-4 xl:grid-cols-3">
@@ -182,23 +187,13 @@ export function DashboardClient({
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader
-              title="Open positions"
-              subtitle={`${positions.length} open · ${formatSignedUsd(summary.openPnl)} unrealized`}
-              action={
-                <Link
-                  href="/portfolio"
-                  className="text-xs font-medium text-accent transition-opacity hover:opacity-80"
-                >
-                  View all
-                </Link>
-              }
-            />
-            <CardBody>
-              <LivePositionsTable positions={positions} />
-            </CardBody>
-          </Card>
+          <OpenPositionsPanel
+            positions={positions}
+            summary={summary}
+            title="Open positions"
+            showTotals
+            compactHeader
+          />
 
           <JournalCard entries={journalEntries} />
 

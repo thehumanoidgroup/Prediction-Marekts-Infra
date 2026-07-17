@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { notifyPortfolioRefresh } from "@/hooks/use-dashboard-data";
+import { notifyPortfolioPosition } from "@/hooks/use-dashboard-data";
 import { useOrderRiskPreview } from "@/hooks/use-order-risk-preview";
+import type { EnrichedPosition } from "@/lib/services";
 import type { Outcome } from "@/lib/types";
 import { useLivePrice } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
@@ -75,7 +76,16 @@ export function TradePanel({
         tone: "up",
         text: `Filled ${side} ${shares} ${outcome.toUpperCase()} @ ${formatCents(price)}`,
       });
-      notifyPortfolioRefresh();
+      const enriched = (body.position ?? null) as EnrichedPosition | null;
+      notifyPortfolioPosition({
+        type: side === "buy" ? "new_position" : "portfolio_update",
+        reason: side === "buy" ? "order_filled" : enriched ? "position_updated" : "position_closed",
+        marketId,
+        position: enriched,
+        summary: body.summary,
+        order: body.order,
+        positions: body.positions,
+      });
       router.refresh();
     } catch {
       setMessage({ tone: "down", text: "Network error — try again" });

@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { notifyPortfolioRefresh } from "@/hooks/use-dashboard-data";
+import { notifyPortfolioPosition } from "@/hooks/use-dashboard-data";
 import { useOrderRiskPreview } from "@/hooks/use-order-risk-preview";
+import type { EnrichedPosition } from "@/lib/services";
 import type { Outcome } from "@/lib/types";
 import { useLivePrice, useOptimisticPriceUpdate } from "@/lib/live-prices";
 import { formatCents, formatUsdPrecise } from "@/lib/format";
@@ -106,7 +107,15 @@ export function BetModal({
       setPlaced(
         `Bought ${shares} ${outcome.toUpperCase()} @ ${formatCents(body.order.price)}`,
       );
-      notifyPortfolioRefresh();
+      notifyPortfolioPosition({
+        type: "new_position",
+        reason: "order_filled",
+        marketId,
+        position: (body.position ?? null) as EnrichedPosition | null,
+        summary: body.summary,
+        order: body.order,
+        positions: body.positions,
+      });
       router.refresh();
     } catch {
       setError("Network error — try again");

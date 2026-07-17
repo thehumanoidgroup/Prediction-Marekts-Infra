@@ -421,4 +421,11 @@ export interface PortfolioSummary {
   profitFactor: number;
   bestDay: number;
   worstDay: number;
+  /** Mark-to-market equity (alias of equity from live portfolio API). */
+  totalValue?: number;
+  /** Sum of open position market values. */
+  positionsValue?: number;
+  /** Count of open positions. */
+  openPositions?: number;
+  numberOfOpenPositions?: number;
 }

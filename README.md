@@ -53,6 +53,40 @@ Password for all demo users: `demo-password-123`
 
 Super Admin: `super@proppredict.demo`
 
+## My Portfolio
+
+Trader **My Portfolio** (`/portfolio`, also on the Dashboard) shows live open positions across every market provider:
+
+| Filter | Markets |
+| --- | --- |
+| Internal | LMSR demo catalog (`mkt-*`) |
+| Polymarket | `poly-*` / CLOB virtual fills |
+| Kalshi | `kalshi-*` live / demo fills |
+| S&P 500 | `sp500-*` 0DTE / weekly stock events |
+
+Features:
+
+- Mark-to-market P&L with live price ticks (WebSocket when available)
+- Instant updates when you place or close a bet (`new_position` / `portfolio_update`)
+- Tenor filters (All / 0DTE / Weekly) and provider filters
+- Challenge-rule warnings when you approach max drawdown or daily loss limits
+- Empty state: **“You have no open positions yet”** with a link to Browse markets
+- Loading skeletons while portfolio data refreshes
+
+API: `GET /api/trader/portfolio` (BFF → FastAPI when `PP_API_URL` is set; otherwise in-memory Next.js store).
+
+## Manual issuance emails
+
+When a Prop Firm Admin clicks **Issue Account** on `/admin/accounts`:
+
+1. `POST /api/admin/accounts/provision` runs `provisionNewAccount` (Prisma account + challenge config + credentials)
+2. With `send_credentials_email: true` (default), `sendProvisioningEmails` sends:
+   - **Trader email** — subject `Your [Firm] Prediction Markets Account is Ready` (credentials / magic link, model type, challenge rules, login + dashboard links, support contact)
+   - **Optional firm admin copy** — confirmation to the issuing admin (non-fatal if it fails)
+3. Delivery uses Resend when `RESEND_API_KEY` is set; otherwise emails are logged to the server console (`lib/email/send.ts`)
+
+Disable with `PROVISIONING_EMAILS_ENABLED=false`. Support address: `SUPPORT_EMAIL` / `SUPPORT_CONTACT`.
+
 ## Deploy to Vercel
 
 1. Import this GitHub repository into Vercel
@@ -72,7 +106,8 @@ Recommended: connect [Vercel Postgres](https://vercel.com/docs/storage/vercel-po
 | `/api/markets` | GET | Hybrid market list (`?source=all\|internal\|polymarket\|kalshi`) |
 | `/api/markets/[id]` | GET | Single market |
 | `/api/orders` | POST | Place order |
-| `/api/portfolio` | GET | Portfolio snapshot |
+| `/api/portfolio` | GET | Legacy portfolio snapshot |
+| `/api/trader/portfolio` | GET | Live open positions + summary (My Portfolio) |
 | `/api/journal` | GET, POST | Trading journal |
 | `/api/tenant` | GET | Public tenant config |
 | `/api/polymarket/markets` | GET | Polymarket CLOB listings |
@@ -144,6 +179,35 @@ Each prop firm can save a **challenge template** per evaluation model (`1step`, 
 4. Per-account overrides (`custom_rules` on webhook, or edited fields on manual issuance)
 
 Webhook purchases and manual issuance share the same fallback. Max drawdown must be **greater than** daily drawdown. Issued accounts register those limits on the in-process risk engine (`lib/engine/risk.ts`); Python trading uses the FastAPI risk engine with the same template wiring.
+
+### Seed test traders (FastAPI)
+
+Idempotent script that creates **3–5 test traders for every prop firm**, distributes model types evenly (`1step` / `2step` / `3step` / `instant`), rotates market providers (internal / Kalshi / Polymarket / S&P 500), applies each firm’s `PropFirmChallengeTemplate`, provisions via `provision_new_account`, and places sample positions so each trader’s **Portfolio** has visible open bets.
+
+```bash
+cd backend
+pip install -r requirements.txt   # once
+# Ensure Postgres is up and base tenants exist (API boot runs seed_database)
+
+PYTHONPATH=. python scripts/seed_test_traders.py
+PYTHONPATH=. python scripts/seed_test_traders.py --traders-per-firm 5 --with-positions
+PYTHONPATH=. python scripts/seed_test_traders.py --tenant-slug apex
+PYTHONPATH=. python scripts/seed_test_traders.py --no-positions
+PYTHONPATH=. python scripts/seed_test_traders.py --replace   # reset seed accounts
+```
+
+**What to verify after a run**
+
+| Check | Expected |
+| --- | --- |
+| Traders per firm | 3–5 (`--traders-per-firm`, clamped) |
+| Model types | Even mix of `1step`, `2step`, `3step`, `instant` |
+| Accounts | Each email has a provisioned `TraderDemoAccount` + challenge config |
+| Portfolio | Sample positions on the in-memory trading session (provider-tagged) |
+
+Emails are **not** sent for seed traders (`send_credentials_email=False`). Use Prop Firm Admin → Issue Account to exercise the welcome-email path.
+
+See `backend/scripts/README.md` for flags, idempotency keys, and login notes.
 
 ## Multi-tenancy
 

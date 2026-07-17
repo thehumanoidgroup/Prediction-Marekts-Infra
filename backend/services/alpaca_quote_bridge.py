@@ -238,6 +238,22 @@ class AlpacaQuoteBridge:
                 ask=ask,
             )
 
+    def get_last_price(self, ticker: str) -> float | None:
+        """Cached Alpaca last trade/mid for a ticker, if seen this process."""
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return None
+        price = self._last_prices.get(symbol)
+        return float(price) if price is not None else None
+
+    def get_last_prices(self, tickers: list[str] | set[str]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for raw in tickers:
+            price = self.get_last_price(str(raw))
+            if price is not None:
+                out[str(raw).strip().upper()] = price
+        return out
+
 
 _bridge: AlpacaQuoteBridge | None = None
 

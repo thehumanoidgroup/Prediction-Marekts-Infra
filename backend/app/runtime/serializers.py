@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from app.engine.risk import ChallengeStatus
 from app.runtime.catalog import now_ms
-from app.runtime.store import JournalRecord, MarketRuntime, TraderSession, TradingStore
+from app.runtime.store import (
+    JournalRecord,
+    MarketRuntime,
+    TraderSession,
+    TradingStore,
+    infer_market_source,
+)
 
 
 def _phase(status: ChallengeStatus) -> str:
@@ -181,7 +187,7 @@ def serialize_position(session: TraderSession, store: TradingStore) -> list[dict
                 "traders": 0,
                 "closesAt": now_ms() + 30 * 24 * 3_600_000,
                 "history": [],
-                "source": meta.get("source", "kalshi"),
+                "source": meta.get("source") or infer_market_source(pos.market_id),
             }
 
         enriched.append(

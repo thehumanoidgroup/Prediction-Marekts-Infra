@@ -14,13 +14,14 @@ async def markets_feed(websocket: WebSocket, tenant_slug: str) -> None:
     Server → client:
     - ``batch_update`` — coalesced live event frames (preferred)
     - ``price_update`` / ``status_change`` / ``new_event`` from the live event broadcaster
+    - ``new_position`` / ``portfolio_update`` — trader portfolio frames (subscribe to ``user:<id>``)
     - Legacy ``price_tick`` events from the ticker
 
     Client → server:
     - ``ping`` keep-alives (answered with ``pong``)
     - ``subscribe`` / ``unsubscribe`` for room-based filtering::
 
-        {"type": "subscribe", "rooms": ["all", "category:crypto", "event:<id>"]}
+        {"type": "subscribe", "rooms": ["all", "user:<traderId>", "category:crypto"]}
         {"type": "unsubscribe", "rooms": ["category:crypto"]}
     """
     accepted = await manager.connect(tenant_slug, websocket)

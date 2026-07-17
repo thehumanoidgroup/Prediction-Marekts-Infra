@@ -7,3 +7,4 @@ out/
 *.db
 prisma/*.db
 tsconfig.tsbuildinfo
+backend/verify_seed.db
