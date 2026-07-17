@@ -17,6 +17,8 @@ from app.schemas.account_provisioning import (
     ChallengeTemplateOut,
     ModelTypePresetOut,
     PreviewRulesRequest,
+    PropFirmChallengeTemplateOut,
+    PropFirmChallengeTemplateSave,
     ProvisionAccountRequest,
     ProvisionAccountResponse,
     SoldAccountOut,
@@ -28,6 +30,12 @@ from services.account_provisioning import (
     list_sold_accounts,
     preview_issuance_rules,
     provision_new_account,
+)
+from services.challenge_template_service import (
+    get_all_templates_for_prop_firm,
+    get_template_for_model,
+    save_or_update_template,
+    template_to_dict,
 )
 
 router = APIRouter(tags=["account-provisioning"])
@@ -127,6 +135,62 @@ async def admin_model_presets(
     """Built-in 1-step / 2-step / 3-step / instant model presets."""
     presets = list_model_type_presets(account_size=account_size, provider=provider)
     return [ModelTypePresetOut.model_validate(p) for p in presets]
+
+
+@router.get(
+    "/admin/accounts/challenge-templates",
+    response_model=list[PropFirmChallengeTemplateOut],
+)
+async def admin_list_firm_challenge_templates(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant: Annotated[Tenant, Depends(get_current_tenant)],
+    _admin: Annotated[User, Depends(get_firm_admin_user)],
+    include_defaults: bool = Query(True),
+) -> list[PropFirmChallengeTemplateOut]:
+    """Prop Firm Admin: list per-model challenge templates (fills defaults when unset)."""
+    templates = await get_all_templates_for_prop_firm(
+        db, tenant.id, include_defaults=include_defaults
+    )
+    return [PropFirmChallengeTemplateOut.model_validate(template_to_dict(t)) for t in templates]
+
+
+@router.get(
+    "/admin/accounts/challenge-templates/{model_type}",
+    response_model=PropFirmChallengeTemplateOut,
+)
+async def admin_get_firm_challenge_template(
+    model_type: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant: Annotated[Tenant, Depends(get_current_tenant)],
+    _admin: Annotated[User, Depends(get_firm_admin_user)],
+) -> PropFirmChallengeTemplateOut:
+    """Prop Firm Admin: get one model template (saved or built-in defaults)."""
+    try:
+        template = await get_template_for_model(db, tenant.id, model_type)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return PropFirmChallengeTemplateOut.model_validate(template_to_dict(template))
+
+
+@router.put(
+    "/admin/accounts/challenge-templates/{model_type}",
+    response_model=PropFirmChallengeTemplateOut,
+)
+async def admin_save_firm_challenge_template(
+    model_type: str,
+    body: PropFirmChallengeTemplateSave,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant: Annotated[Tenant, Depends(get_current_tenant)],
+    _admin: Annotated[User, Depends(get_firm_admin_user)],
+) -> PropFirmChallengeTemplateOut:
+    """Prop Firm Admin: create or update the firm template for a model type."""
+    data = body.model_dump(exclude_none=True)
+    try:
+        template = await save_or_update_template(db, tenant.id, model_type, data)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    await db.commit()
+    return PropFirmChallengeTemplateOut.model_validate(template_to_dict(template))
 
 
 @router.post("/admin/accounts/preview-rules", response_model=ChallengeRulesPreview)

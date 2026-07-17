@@ -66,6 +66,47 @@ class ModelTypePresetOut(BaseModel):
     rules: ChallengeRulesPreview
 
 
+class PropFirmChallengeTemplateOut(BaseModel):
+    """Per-firm challenge template (or built-in defaults when ``is_default``)."""
+
+    id: str | None = None
+    prop_firm_id: str
+    model_type: str
+    profit_target: float
+    daily_drawdown: float
+    max_drawdown: float
+    max_bet_size_per_pick: float
+    max_bet_size_mode: str
+    max_bet_size_rules: dict[str, Any] | None = None
+    consistency_score: float | None = None
+    min_trading_days: int | None = None
+    other_rules: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    challenge_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class PropFirmChallengeTemplateSave(BaseModel):
+    """Create/update payload for a firm challenge template."""
+
+    profit_target: float | None = Field(None, ge=0.1, le=100)
+    profit_target_pct: float | None = Field(None, ge=0.1, le=100)
+    daily_drawdown: float | None = Field(None, ge=0.1, le=100)
+    max_daily_loss_pct: float | None = Field(None, ge=0.1, le=100)
+    max_drawdown: float | None = Field(None, ge=0.1, le=100)
+    max_drawdown_pct: float | None = Field(None, ge=0.1, le=100)
+    max_bet_size_per_pick: float | None = Field(None, gt=0)
+    max_stake_per_order: float | None = Field(None, gt=0)
+    max_bet_size_mode: Literal["percent", "fixed"] | None = None
+    max_bet_size_rules: dict[str, Any] | None = None
+    consistency_score: float | None = Field(None, ge=0, le=1)
+    min_consistency_score: float | None = Field(None, ge=0, le=1)
+    min_trading_days: int | None = Field(None, ge=0, le=365)
+    other_rules: dict[str, Any] | None = None
+    drawdown_mode: Literal["static", "trailing", "absolute"] | None = None
+    profit_split_pct: float | None = Field(None, ge=1, le=100)
+    challenge_duration_days: int | None = Field(None, ge=1, le=730)
+
+
 class ProvisionAccountRequest(BaseModel):
     """Manual issuance from the Prop Firm Admin dashboard."""
 

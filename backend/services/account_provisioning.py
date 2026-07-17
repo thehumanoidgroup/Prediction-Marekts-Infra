@@ -34,6 +34,11 @@ from services.challenge_presets import (
     challenge_config_to_dict,
     resolve_challenge_rules,
 )
+from services.challenge_template_service import (
+    firm_template_rule_overrides,
+    get_template_for_model,
+    is_persisted_template,
+)
 from services.email_service import AccountCredentialsEmail, send_account_credentials_email
 
 logger = logging.getLogger(__name__)
@@ -209,11 +214,19 @@ async def preview_issuance_rules(
     base = challenge_config_to_dict(template or product.challenge_config)
     base["provider"] = provider.value
 
+    firm_template = await get_template_for_model(db, tenant.id, model_type)
+    issuance_overrides = _merge_challenge_overrides(challenge_rules, template_config_id) or {}
+    if is_persisted_template(firm_template):
+        issuance_overrides = {
+            **firm_template_rule_overrides(firm_template),
+            **issuance_overrides,
+        }
+
     resolved = resolve_challenge_rules(
         base=base,
         model_type=model_type,
         account_size=float(account_size),
-        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
+        overrides=issuance_overrides or None,
     )
     return _rules_to_preview(resolved, model_type=model_type, account_size=float(account_size))
 
@@ -233,11 +246,21 @@ async def _create_issuance_challenge_config(
     base = challenge_config_to_dict(template or product.challenge_config)
     base["provider"] = provider.value
 
+    firm_template = await get_template_for_model(db, tenant.id, model_type)
+    issuance_overrides = _merge_challenge_overrides(challenge_rules, template_config_id) or {}
+    template_id: str | None = None
+    if is_persisted_template(firm_template):
+        template_id = firm_template.id
+        issuance_overrides = {
+            **firm_template_rule_overrides(firm_template),
+            **issuance_overrides,
+        }
+
     resolved = resolve_challenge_rules(
         base=base,
         model_type=model_type,
         account_size=account_size,
-        overrides=_merge_challenge_overrides(challenge_rules, template_config_id),
+        overrides=issuance_overrides or None,
     )
 
     label_prefix = {
@@ -265,6 +288,7 @@ async def _create_issuance_challenge_config(
         min_trading_days=int(resolved.get("min_trading_days", 10)),
         model_type=model_type,
         min_consistency_score=resolved.get("min_consistency_score"),
+        template_id=template_id,
         kalshi_market_tickers=product.kalshi_market_tickers or product.challenge_config.kalshi_market_tickers,
         sp500_tickers=(
             list(product.challenge_config.sp500_tickers)
