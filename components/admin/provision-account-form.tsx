@@ -163,6 +163,14 @@ export function ProvisionAccountForm() {
             <Badge tone="accent">{result.provider}</Badge>
           </div>
           <p className="mt-2 font-mono text-xs text-muted">Account ID: {result.account_id}</p>
+          {result.email_sent ? (
+            <p className="mt-2 text-xs text-up">
+              Welcome email with account details, login credentials, challenge rules, and a
+              Trader Dashboard link was sent to the trader.
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-down">Credentials email was not sent.</p>
+          )}
           {result.kalshi_live_integration_enabled ? (
             <p className="mt-1 text-xs text-muted">
               Kalshi live feed enabled ({result.kalshi_market_tickers.length} markets)

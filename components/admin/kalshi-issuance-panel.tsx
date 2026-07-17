@@ -121,8 +121,20 @@ function IssuanceSuccess({
         </div>
         <div>
           <dt className="text-muted">Credentials email</dt>
-          <dd className="font-semibold">{result.email_sent ? "Sent" : "Not sent"}</dd>
+          <dd className="font-semibold">
+            {result.email_sent ? (
+              <span className="text-up">Sent to trader</span>
+            ) : (
+              <span className="text-down">Not sent</span>
+            )}
+          </dd>
         </div>
+        {result.email_sent ? (
+          <div className="sm:col-span-2 rounded-lg border border-up/30 bg-up/10 px-3 py-2 text-sm text-up">
+            A welcome email with account details, login credentials, challenge rules, and a
+            Trader Dashboard link was sent to <strong>{result.email}</strong>.
+          </div>
+        ) : null}
         <div>
           <dt className="text-muted">New user</dt>
           <dd className="font-semibold">{result.created_user ? "Yes" : "Existing trader"}</dd>

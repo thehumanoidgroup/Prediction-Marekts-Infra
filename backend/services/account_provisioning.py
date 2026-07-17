@@ -41,7 +41,12 @@ from services.challenge_template_service import (
     is_persisted_template,
     normalize_model_type,
 )
-from services.email_service import AccountCredentialsEmail, send_account_credentials_email
+from services.email_service import (
+    AccountCredentialsEmail,
+    PropFirmIssuanceCopyEmail,
+    send_account_credentials_email,
+    send_prop_firm_issuance_copy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1277,7 +1282,15 @@ async def provision_new_account(
     email_sent = False
     if send_credentials_email and (created_user or issuance_source is IssuanceSource.MANUAL):
         settings = get_settings()
-        login_url = f"{settings.trader_login_base_url.rstrip('/')}?tenant={tenant.slug}"
+        base = settings.trader_login_base_url.rstrip("/")
+        # Prefer a path-style login URL; fall back to query tenant for white-label.
+        if "/login" in base:
+            login_url = f"{base}?tenant={tenant.slug}"
+            dashboard_url = f"{base.rsplit('/login', 1)[0]}/dashboard?tenant={tenant.slug}"
+        else:
+            login_url = f"{base}/login?tenant={tenant.slug}"
+            dashboard_url = f"{base}/dashboard?tenant={tenant.slug}"
+        support_contact = getattr(settings, "support_email", None) or "support@proppredict.com"
         email_sent = await send_account_credentials_email(
             AccountCredentialsEmail(
                 to_email=user.email,
@@ -1287,8 +1300,53 @@ async def provision_new_account(
                 account_size=account_size_f,
                 login_url=login_url,
                 temporary_password=temporary_password if created_user else None,
+                model_type=resolved_model_type,
+                dashboard_url=dashboard_url,
+                challenge_rules=dict(applied_rules or {}),
+                support_contact=support_contact,
             )
         )
+
+        # Optional confirmation copy for the issuing prop firm admin.
+        issuer: User | None = None
+        if issued_by_user_id:
+            issuer_result = await db.execute(select(User).where(User.id == issued_by_user_id))
+            issuer = issuer_result.scalar_one_or_none()
+        if issuer is None:
+            admin_result = await db.execute(
+                select(User)
+                .where(
+                    User.tenant_id == tenant.id,
+                    User.role == UserRole.PROP_FIRM_ADMIN,
+                    User.is_active.is_(True),
+                )
+                .order_by(User.created_at.asc())
+                .limit(1)
+            )
+            issuer = admin_result.scalar_one_or_none()
+        if issuer and issuer.email:
+            try:
+                await send_prop_firm_issuance_copy(
+                    PropFirmIssuanceCopyEmail(
+                        to_email=issuer.email,
+                        tenant_name=tenant.name,
+                        trader_email=user.email,
+                        provider=resolved_provider.value,
+                        account_size=account_size_f,
+                        model_type=resolved_model_type,
+                        account_id=account.id,
+                        challenge_rules=dict(applied_rules or {}),
+                        issued_by_name=issuer.display_name,
+                        dashboard_url=dashboard_url,
+                        support_contact=support_contact,
+                    )
+                )
+            except Exception:  # noqa: BLE001 — firm copy is optional / non-fatal
+                logger.exception(
+                    "Prop firm issuance copy failed for tenant=%s trader=%s",
+                    tenant.slug,
+                    user.email,
+                )
 
     sold_meta: dict[str, Any] = dict(metadata or {})
     if sp500_tickers:
